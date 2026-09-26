@@ -16,16 +16,13 @@ import matplotlib.dates as mdates
 import matplotlib.ticker as ticker
 import numpy as np
 
-# Tableau 10 inspired muted palette (colorblind-friendly)
+# SaaS Dashboard Palette: Royal Blue, Rose/Coral, Emerald/Teal, Amber
 PALETTE = [
-    "#4E79A7",  # Steel Blue
-    "#E15759",  # Salmon Red
-    "#76B7B2",  # Teal
-    "#F28E2B",  # Orange
-    "#59A14F",  # Green
-    "#EDC948",  # Gold
-    "#AF7AA1",  # Purple
-    "#FF9DA7",  # Pink
+    "#2563EB",  # Royal Blue (Primary)
+    "#F43F5E",  # Rose / Coral (Secondary)
+    "#0D9488",  # Teal
+    "#F59E0B",  # Amber
+    "#8B5CF6",  # Violet
 ]
 
 # Background color matching report cards
@@ -36,8 +33,8 @@ def main():
     parser.add_argument("--input", action="append", required=True, help="Path to JSON file(s) from fetch_pageviews.py. Can be specified multiple times.")
     parser.add_argument("--title", default="", help="Chart title (optional, leave empty for seamless report embedding)")
     parser.add_argument("--output", default="chart.png", help="Output PNG file path")
-    parser.add_argument("--width", type=float, default=11.5, help="Chart width in inches")
-    parser.add_argument("--height", type=float, default=5.0, help="Chart height in inches")
+    parser.add_argument("--width", type=float, default=9.2, help="Chart width in inches")
+    parser.add_argument("--height", type=float, default=3.0, help="Chart height in inches")
     parser.add_argument("--trend-line", action="store_true", help="Add subtle linear trend lines")
     
     args = parser.parse_args()

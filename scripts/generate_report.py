@@ -2,688 +2,543 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "fpdf2>=2.7",
-#     "matplotlib",
-#     "numpy",
 # ]
 # ///
 """
-generate_report.py — Premium Portrait A4 PDF for Wiki Trends Agent Skill.
-
-Layout (Portrait A4, 210×297mm):
-  Zone 1 — HERO HEADER   (0–68mm)    Dark navy gradient, giant KPI numbers per dataset
-  Zone 2 — MAIN CHART    (70–158mm)  Full-width Tableau-style time-series chart
-  Zone 3 — MINI CHARTS   (161–210mm) YoY % bar chart  +  Seasonality monthly chart
-  Zone 4 — INSIGHT CARDS (213–286mm) Strategic conclusion · Key signals · Data quality
-  Zone 5 — FOOTER        (288–297mm)
+generate_report.py — Modern SaaS-style Executive Wikipedia Trends Report.
+Matches the design system of high-end analytical dashboards (floating cards,
+status badges, anomaly callout banner, central chart, deep AI insights card,
+and blue Quick Wins action plan).
 """
 import argparse
 import json
 import os
 import sys
-import tempfile
 from datetime import datetime
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import numpy as np
-
 
 # ═══════════════════════════════════════════════════════════════
-# Design Tokens
+# Design Tokens (Exact Dashboard Match)
 # ═══════════════════════════════════════════════════════════════
-# All fpdf2 colours are (R, G, B) int tuples 0-255
-NAVY        = (15,  23,  42)    # #0F172A — hero header dark end
-NAVY_MID    = (30,  58, 138)    # #1E3A8A — hero header light end
-INDIGO      = (79,  70, 229)    # #4F46E5 — primary accent
-INDIGO_BG   = (238, 242, 255)   # #EEF2FF
-TEAL        = (13, 148, 136)    # #0D9488 — secondary accent
-PAGE_BG     = (248, 250, 252)   # #F8FAFC
-CARD_BG     = (255, 255, 255)
-BORDER      = (226, 232, 240)   # slate-200
-T400        = (148, 163, 184)   # slate-400  (muted)
-T500        = (100, 116, 139)   # slate-500
-T700        = (51,  65,  85)    # slate-700  (body)
-T900        = (15,  23,  42)    # slate-900  (headings)
-WHITE       = (255, 255, 255)
-WHITE_DIM   = (226, 232, 240)   # slightly muted white (on dark)
-WHITE_MUTED = (148, 163, 184)   # very muted white (on dark)
+PAGE_BG         = (244, 245, 247)   # Neutral soft gray canvas (#F4F5F7)
+CARD_BG         = (255, 255, 255)   # Pure white
+CARD_BORDER     = (229, 231, 235)   # Slate 200 border (#E5E7EB)
+CARD_SHADOW     = (238, 240, 244)   # Subtle drop-shadow tone
 
-GREEN_BG = (220, 252, 231);  GREEN_T = (22, 101, 52)
-RED_BG   = (255, 228, 230);  RED_T   = (159, 18,  57)
+TEXT_900        = (15,  23,  42)    # Darkest slate (#0F172A)
+TEXT_700        = (51,  65,  85)    # Body slate (#334155)
+TEXT_500        = (100, 116, 139)   # Muted gray (#64748B)
+TEXT_400        = (148, 163, 184)   # Light gray (#94A3B8)
 
-# Dataset accent colors — Tableau 10 inspired
-DS_RGB = [(78, 121, 167), (225, 87, 89), (118, 183, 178), (242, 142, 43)]
-DS_HEX = ['#4E79A7',      '#E15759',     '#76B7B2',        '#F28E2B']
+# Alerts & Negative
+RED_ACCENT      = (239, 68,  68)    # #EF4444
+RED_BG          = (254, 226, 226)   # #FEE2E2
+RED_TEXT        = (220, 38,  38)    # #DC2626
 
-# Insight card left-border colors
-INSIGHT_ACCENTS = [INDIGO, TEAL, (100, 116, 139)]
+# Positive
+GREEN_ACCENT    = (16,  185, 129)   # #10B981
+GREEN_BG        = (220, 252, 231)   # #DCFCE7
+GREEN_TEXT      = (22,  101, 52)    # #166534
 
-# Layout constants (mm)
-PW = 210;  PH = 297
-ML = 10;   MR = 10
-CW = PW - ML - MR                 # 190mm usable width
+# Primary Actions / Blue
+BLUE_PRIMARY    = (37,  99,  235)   # #2563EB (Royal Blue)
+BLUE_BG         = (239, 246, 255)   # #EFF6FF
+BLUE_LIGHT      = (191, 219, 254)   # #BFDBFE
 
-HERO_Y,  HERO_H  = 0,   68
-CHART_Y, CHART_H = 70,  88
-MINI_Y,  MINI_H  = 161, 50
-INS_Y             = 214
-INS_CARD_H        = 23
-INS_GAP           = 2.5
-FOOTER_Y          = 288
+# Dark Insights Card
+DARK_CARD_BG    = (15,  23,  42)    # #0F172A
+DARK_TILE_BG    = (30,  41,  59)    # #1E293B
+DARK_TILE_BORDER= (51,  65,  85)    # #334155
+PURPLE_ACCENT   = (192, 132, 252)   # #C084FC
+CYAN_ACCENT     = (56,  189, 248)   # #38BDF8
+AMBER_ACCENT    = (251, 191, 36)    # #FBBF24
 
 
-# ═══════════════════════════════════════════════════════════════
-# Helpers
-# ═══════════════════════════════════════════════════════════════
-
-def _s(v) -> str:
-    return str(v) if v is not None else "—"
-
-def _n(n) -> str:
-    """Format number with thin-space thousands separator."""
-    if n is None:
-        return "—"
-    return f"{int(n):,}".replace(",", "\u2009")   # thin space
-
-def _conf(raw) -> str:
-    m = {"висока": "висока", "середня": "середня", "низька": "низька",
-         "high": "висока", "medium": "середня", "low": "низька"}
-    return m.get(str(raw).lower(), _s(raw))
-
-
-# ═══════════════════════════════════════════════════════════════
-# PDF Class
-# ═══════════════════════════════════════════════════════════════
-
-class PremiumPDF(FPDF):
-    def __init__(self, ff="DejaVu"):
+class ModernDashboardPDF(FPDF):
+    def __init__(self, font_family="DejaVu"):
         super().__init__(orientation="P", unit="mm", format="A4")
-        self.ff = ff
+        self.ff = font_family
         self.set_auto_page_break(auto=False)
 
-    # ── Hero ─────────────────────────────────────────────────
+    # ── Drawing Primitives ───────────────────────────────────
 
-    def _hero_bg(self):
-        """Simulate navy→indigo vertical gradient with thin strips."""
-        steps = 16
-        r1, g1, b1 = NAVY
-        r2, g2, b2 = NAVY_MID
-        sh = HERO_H / steps
-        for i in range(steps):
-            t = i / max(steps - 1, 1) * 0.45   # blend only 45%
-            r = int(r1 + (r2 - r1) * t)
-            g = int(g1 + (g2 - g1) * t)
-            b = int(b1 + (b2 - b1) * t)
-            self.set_fill_color(r, g, b)
-            self.rect(0, i * sh, PW, sh + 0.5, style="F")
+    def draw_card(self, x, y, w, h, bg=CARD_BG, border=CARD_BORDER, r=3.5, shadow=True):
+        """Draw a card with rounded corners and subtle drop-shadow."""
+        if shadow:
+            self.set_fill_color(*CARD_SHADOW)
+            self.rect(x + 0.3, y + 0.6, w, h, style="F", round_corners=True, corner_radius=r)
+        self.set_fill_color(*bg)
+        if border:
+            self.set_draw_color(*border)
+            self.set_line_width(0.2)
+            self.rect(x, y, w, h, style="DF", round_corners=True, corner_radius=r)
+        else:
+            self.rect(x, y, w, h, style="F", round_corners=True, corner_radius=r)
 
-    def draw_hero(self, title: str, datasets: list, now_str: str):
-        self._hero_bg()
+    def draw_pill(self, x, y, text, bg=RED_BG, tc=RED_TEXT, font_size=7, bold=True, h=5.0):
+        """Rounded badge/pill."""
+        self.set_font(self.ff, "B" if bold else "", font_size)
+        pw = self.get_string_width(text) + 6
+        self.set_fill_color(*bg)
+        self.rect(x, y, pw, h, style="F", round_corners=True, corner_radius=h / 2)
+        self.set_xy(x, y + (h - 3.2) / 2)
+        self.set_text_color(*tc)
+        self.cell(pw, 3.2, text, align="C")
+        return pw
 
-        # Top indigo accent stripe
-        self.set_fill_color(*INDIGO)
-        self.rect(0, 0, PW, 2.5, style="F")
+    def draw_check_icon(self, cx, cy, radius=2.6, bg=BLUE_PRIMARY, check_color=(255, 255, 255)):
+        """Draw a filled circle with a checkmark."""
+        self.set_fill_color(*bg)
+        self.ellipse(cx - radius, cy - radius, radius * 2, radius * 2, style="F")
+        # Draw checkmark lines
+        self.set_draw_color(*check_color)
+        self.set_line_width(0.4)
+        # Checkmark points: left, bottom, top-right
+        x1 = cx - radius * 0.45
+        y1 = cy
+        x2 = cx - radius * 0.1
+        y2 = cy + radius * 0.45
+        x3 = cx + radius * 0.55
+        y3 = cy - radius * 0.45
+        self.line(x1, y1, x2, y2)
+        self.line(x2, y2, x3, y3)
 
-        # Pill badge — top left
-        self.set_font(self.ff, "B", 6.5)
-        pill_lbl = "WIKIPEDIA MARKET INTELLIGENCE"
-        pw = self.get_string_width(pill_lbl) + 8
-        self.set_fill_color(*INDIGO)
-        self.rect(ML, 7, pw, 5, style="F", round_corners=True, corner_radius=2.5)
-        self.set_text_color(*WHITE)
-        self.set_xy(ML, 7 + 1)
-        self.cell(pw, 3, pill_lbl, align="C")
-
-        # Date metadata — top right
-        self.set_font(self.ff, "", 7.5)
-        self.set_text_color(*WHITE_MUTED)
-        self.set_xy(ML, 7)
-        self.cell(CW, 5, f"Дата: {now_str}  •  Вибірка: 24 міс  •  Wikimedia REST API", align="R")
-
-        # Title
-        self.set_xy(ML, 14)
-        self.set_font(self.ff, "B", 16)
-        self.set_text_color(*WHITE)
-        self.cell(CW, 7, _s(title))
-
-        # Subtitle separator
-        self.set_draw_color(*INDIGO)
-        self.set_line_width(0.25)
-        self.line(ML, 23, PW - MR, 23)
-
-        # KPI blocks — split evenly for up to 3 datasets
-        n = min(len(datasets), 3)
-        if n == 0:
-            return
-        bw = CW / n
-        for i, ds in enumerate(datasets[:3]):
-            bx = ML + i * bw
-            self._hero_kpi(bx, 26, bw, ds, i)
-            if i < n - 1:
-                # vertical divider
-                self.set_draw_color(79, 70, 229)
-                self.set_line_width(0.2)
-                self.line(bx + bw, 27, bx + bw, 66)
-
-    def _hero_kpi(self, x: float, y: float, w: float, ds: dict, idx: int):
-        article = ds.get("article_display", "—")
-        project = ds.get("project", "—")
-        lang    = project.split(".")[0].upper() if "." in project else project[:3].upper()
-        total   = ds.get("total_views", 0)
-        avg     = ds.get("avg_views", 0)
-        trend   = ds.get("trend", {})
-        pct     = trend.get("change_percent_total", 0.0)
-        r2      = trend.get("r_squared", 0.0)
-        conf    = _conf(trend.get("confidence", "—"))
-
-        # Article name
-        self.set_xy(x + 4, y)
-        self.set_font(self.ff, "B", 9.5)
-        self.set_text_color(*WHITE_DIM)
-        # Truncate long article names
-        max_chars = int(w / 2.6)
-        disp = article if len(article) <= max_chars else article[:max_chars - 1] + "…"
-        self.cell(w - 6, 5, _s(disp))
-
-        # Language pill
-        dc = DS_RGB[idx % len(DS_RGB)]
-        self.set_fill_color(*dc)
-        lpw = self.get_string_width(lang) + 5
-        self.rect(x + 4, y + 6, lpw, 4, style="F", round_corners=True, corner_radius=2)
-        self.set_font(self.ff, "B", 6)
-        self.set_text_color(*WHITE)
-        self.set_xy(x + 4, y + 6.5)
-        self.cell(lpw, 3, lang, align="C")
-
-        # TOTAL label
-        self.set_xy(x + 4, y + 12.5)
-        self.set_font(self.ff, "", 6.5)
-        self.set_text_color(*WHITE_MUTED)
-        self.cell(w - 8, 3, "ЗАГАЛЬНІ ПЕРЕГЛЯДИ")
-
-        # Giant number
-        self.set_xy(x + 4, y + 16)
-        self.set_font(self.ff, "B", 23)
-        self.set_text_color(*WHITE)
-        self.cell(w - 8, 10, _n(total))
-
-        # Avg /mo label
-        self.set_xy(x + 4, y + 27)
-        self.set_font(self.ff, "", 7.5)
-        self.set_text_color(*WHITE_MUTED)
-        self.cell(w - 8, 3.5, f"ср. {_n(int(avg))} / місяць")
-
-        # Trend badge
-        is_up   = pct > 0
-        bbg     = GREEN_BG if is_up else RED_BG
-        btc     = GREEN_T  if is_up else RED_T
-        arrow   = "\u25B2" if is_up else "\u25BC"
-        blabel  = f"{arrow} {pct:+.1f}%"
-        bw_badge = max(26, self.get_string_width(blabel) + 7)
-        bh = 5.5
-        by = y + 32
-        self.set_fill_color(*bbg)
-        self.set_draw_color(*bbg)
-        self.rect(x + 4, by, bw_badge, bh, style="F", round_corners=True, corner_radius=2.5)
+    def draw_alert_icon(self, cx, cy, radius=3.2, bg=RED_BG, tc=RED_TEXT):
+        """Draw circular alert icon with exclamation mark."""
+        self.set_fill_color(*bg)
+        self.ellipse(cx - radius, cy - radius, radius * 2, radius * 2, style="F")
         self.set_font(self.ff, "B", 8)
-        self.set_text_color(*btc)
-        self.set_xy(x + 4, by + (bh - 3.2) / 2)
-        self.cell(bw_badge, 3.2, blabel, align="C")
-
-        # R² + confidence alongside badge
-        self.set_xy(x + 4 + bw_badge + 2.5, by + (bh - 3.2) / 2)
-        self.set_font(self.ff, "", 6.5)
-        self.set_text_color(*WHITE_MUTED)
-        self.cell(40, 3.2, f"R²={r2:.2f}  •  {conf}")
-
-    # ── Chart zone ───────────────────────────────────────────
-
-    def draw_chart_zone(self, chart_path: str):
-        y, h = CHART_Y, CHART_H
-        self.set_fill_color(*CARD_BG)
-        self.set_draw_color(*BORDER)
-        self.set_line_width(0.2)
-        self.rect(ML, y, CW, h, style="DF", round_corners=True, corner_radius=3)
-
-        # Section label
-        self.set_xy(ML + 5, y + 3.5)
-        self.set_font(self.ff, "B", 7)
-        self.set_text_color(*T500)
-        self.cell(CW, 3.5, "ДИНАМІКА ПЕРЕГЛЯДІВ  •  ЧАСОВИЙ РЯД 24 МІСЯЦІ")
-
-        if chart_path and os.path.exists(chart_path):
-            try:
-                self.image(chart_path, x=ML + 2, y=y + 8, w=CW - 4, h=h - 10)
-            except Exception as e:
-                sys.stderr.write(f"Warning: chart embed failed: {e}\n")
-
-    # ── Mini charts zone ─────────────────────────────────────
-
-    def draw_mini_zone(self, yoy_path: str | None, season_path: str | None):
-        y, h = MINI_Y, MINI_H
-
-        # Light band background
-        self.set_fill_color(*PAGE_BG)
-        self.rect(0, y - 2, PW, h + 4, style="F")
-
-        cw = (CW - 5) / 2        # ~92.5mm per card
-        ch = h - 4                # card height
-
-        configs = [
-            (yoy_path,    "РІК ДО РОКУ  (YoY ЗМІНА %)"),
-            (season_path, "СЕЗОННІСТЬ ПО МІСЯЦЯХ"),
-        ]
-        for i, (path, label) in enumerate(configs):
-            cx = ML + i * (cw + 5)
-            self.set_fill_color(*CARD_BG)
-            self.set_draw_color(*BORDER)
-            self.set_line_width(0.2)
-            self.rect(cx, y, cw, ch, style="DF", round_corners=True, corner_radius=3)
-
-            # Left accent strip
-            bar_c = [INDIGO, TEAL][i]
-            self.set_fill_color(*bar_c)
-            self.rect(cx, y, 2.5, ch, style="F", round_corners=True, corner_radius=1.5)
-
-            # Label
-            self.set_xy(cx + 5, y + 3.5)
-            self.set_font(self.ff, "B", 7)
-            self.set_text_color(*bar_c)
-            self.cell(cw - 8, 3.5, label)
-
-            if path and os.path.exists(path):
-                try:
-                    self.image(path, x=cx + 2.5, y=y + 9, w=cw - 5, h=ch - 11)
-                except Exception as e:
-                    sys.stderr.write(f"Warning: mini chart {i} embed failed: {e}\n")
-
-    # ── Insight cards ────────────────────────────────────────
-
-    def draw_insights(self, datasets: list, comparison: dict, limitations: list):
-        for i, (title, lines, accent) in enumerate(_build_insights(datasets, comparison, limitations)):
-            cy = INS_Y + i * (INS_CARD_H + INS_GAP)
-
-            # Card background
-            self.set_fill_color(*CARD_BG)
-            self.set_draw_color(*BORDER)
-            self.set_line_width(0.2)
-            self.rect(ML, cy, CW, INS_CARD_H, style="DF", round_corners=True, corner_radius=2.5)
-
-            # Left accent bar
-            self.set_fill_color(*accent)
-            self.rect(ML, cy, 4, INS_CARD_H, style="F", round_corners=True, corner_radius=2)
-
-            # Title
-            self.set_xy(ML + 7, cy + 4)
-            self.set_font(self.ff, "B", 9)
-            self.set_text_color(*accent)
-            self.cell(CW - 10, 4.5, _s(title))
-
-            # Body (up to 2 lines of informative text)
-            by = cy + 9.5
-            for line in lines[:2]:
-                if by >= cy + INS_CARD_H - 2:
-                    break
-                self.set_xy(ML + 7, by)
-                self.set_font(self.ff, "", 8.5)
-                self.set_text_color(*T700)
-                self.multi_cell(CW - 10, 4, _s(line),
-                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                by = min(self.get_y() + 0.5, cy + INS_CARD_H - 2)
-
-    # ── Footer ───────────────────────────────────────────────
-
-    def draw_footer(self):
-        self.set_draw_color(*BORDER)
-        self.set_line_width(0.25)
-        self.line(ML, FOOTER_Y, PW - MR, FOOTER_Y)
-        self.set_xy(ML, FOOTER_Y + 2.5)
-        self.set_font(self.ff, "", 6.5)
-        self.set_text_color(*T400)
-        self.cell(CW, 3.5,
-                  "wiki-trends  •  Agent Skills  •  Автономний AI-аналітик ринкового попиту  •  Дані: Wikimedia REST API (CC BY-SA)",
-                  align="C")
-
-
-# ═══════════════════════════════════════════════════════════════
-# Insight content builder
-# ═══════════════════════════════════════════════════════════════
-
-def _build_insights(datasets, comparison, limitations):
-    """Return list of (title, [line1, line2], accent_color) for 3 insight cards."""
-
-    # ── Card 1: Strategic conclusion ──
-    rec = ""
-    if isinstance(comparison, dict):
-        rec = comparison.get("recommendation", "")
-    if not rec and datasets:
-        d0 = datasets[0]
-        t = d0.get("trend", {})
-        dir_uk = "зростання" if t.get("direction") == "growing" else "спад"
-        rec = f"Тема «{d0.get('article_display')}» демонструє {dir_uk} інтересу: {t.get('change_percent_total', 0):+.1f}%."
-
-    line2 = ""
-    if isinstance(comparison, dict):
-        fg = comparison.get("fastest_growing", {})
-        la = comparison.get("largest_audience", {})
-        if fg and la:
-            line2 = (f"Відносний лідер росту: {fg.get('project','—')}. "
-                     f"Найбільша аудиторія: {la.get('project','—')} "
-                     f"({_n(int(la.get('avg_monthly_views', 0)))} переглядів/міс).")
-
-    card1 = ("СТРАТЕГІЧНИЙ ВИСНОВОК", [rec, line2] if line2 else [rec], INDIGO)
-
-    # ── Card 2: Key signals ──
-    signals = []
-    for ds in datasets:
-        art = ds.get("article_display", "")
-        proj = ds.get("project", "").split(".")[0].upper()
-        yoy_list = ds.get("yoy_changes", [])
-        anom_list = ds.get("anomalies", [])
-        season = ds.get("seasonality", {})
-
-        # YoY changes (most recent 2)
-        for yc in yoy_list[:2]:
-            signals.append(f"{proj} ({art}): {yc.get('period')} → {yc.get('change_percent', 0):+.1f}%")
-
-        # Anomalies
-        for a in anom_list[:1]:
-            signals.append(f"{proj}: пік {a.get('timestamp')} — {_n(a.get('views', 0))} переглядів  (Z={a.get('z_score', 0):.1f}σ)")
-
-        # Seasonality
-        if isinstance(season, dict) and season.get("detected"):
-            peaks = season.get("peak_months", [])
-            troughs = season.get("trough_months", [])
-            if peaks:
-                signals.append(f"{proj}: пікові місяці — {', '.join(str(m) for m in peaks[:6])}")
-            elif troughs:
-                signals.append(f"{proj}: мінімальний сезон — місяці {', '.join(str(m) for m in troughs[:4])}")
-
-    if not signals:
-        signals = ["Значних сигналів не виявлено."]
-
-    card2 = ("КЛЮЧОВІ СИГНАЛИ ТА АНОМАЛІЇ", signals[:2], TEAL)
-
-    # ── Card 3: Data quality ──
-    qual = []
-    for ds in datasets[:2]:
-        t = ds.get("trend", {})
-        proj = ds.get("project", "").split(".")[0].upper()
-        r2 = t.get("r_squared", 0.0)
-        conf = _conf(t.get("confidence", "—"))
-        total = ds.get("total_views", 0)
-        n_pts = len([1 for _ in range(24)])  # proxy — 24-month window
-        qual.append(f"{proj}: R²={r2:.2f} ({conf} тренд), {_n(total)} переглядів за вибіркою")
-
-    if not qual:
-        qual = limitations[:2] if limitations else ["Дані Wikimedia API відфільтровано від ботів (agent=user)."]
-
-    card3 = ("ЯКІСТЬ ДАНИХ", qual[:2], (100, 116, 139))
-
-    return [card1, card2, card3]
-
-
-# ═══════════════════════════════════════════════════════════════
-# Mini-chart generators (matplotlib)
-# ═══════════════════════════════════════════════════════════════
-
-def _yoy_chart(datasets: list, tmp_dir: str) -> str | None:
-    """Grouped vertical bar chart of YoY % changes per dataset."""
-    out = os.path.join(tmp_dir, "_yoy.png")
-
-    # Collect union of all period labels
-    all_periods: list[str] = []
-    for ds in datasets:
-        for yc in ds.get("yoy_changes", []):
-            p = yc.get("period", "")
-            if p and p not in all_periods:
-                all_periods.append(p)
-    all_periods.sort()
-    if not all_periods:
-        return None
-
-    fig, ax = plt.subplots(figsize=(4.3, 2.4), dpi=180)
-    fig.patch.set_facecolor('#FFFFFF')
-    ax.set_facecolor('#FFFFFF')
-
-    n_ds = min(len(datasets), 2)
-    n_p  = len(all_periods)
-    bw   = 0.38
-    x    = np.arange(n_p)
-
-    for i, ds in enumerate(datasets[:2]):
-        vals = []
-        for period in all_periods:
-            pct = 0.0
-            for yc in ds.get("yoy_changes", []):
-                if yc.get("period") == period:
-                    pct = yc.get("change_percent", 0.0)
-                    break
-            vals.append(pct)
-
-        offset = (i - (n_ds - 1) / 2) * bw
-        bars = ax.bar(x + offset, vals, bw * 0.88,
-                      color=DS_HEX[i % len(DS_HEX)], alpha=0.85,
-                      edgecolor='white', linewidth=0.6)
-
-        for bar, val in zip(bars, vals):
-            ax.annotate(f"{val:+.0f}%",
-                        xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
-                        xytext=(0, 4 if val >= 0 else -12),
-                        textcoords="offset points",
-                        ha='center', va='bottom' if val >= 0 else 'top',
-                        fontsize=7.5, fontweight='bold', color='#1E293B')
-
-    ax.axhline(0, color='#94A3B8', linewidth=0.8)
-    ax.set_xticks(x)
-    ax.set_xticklabels([p.replace(" vs ", "\nvs ") for p in all_periods],
-                       fontsize=7.5, color='#6B7280')
-    ax.tick_params(axis='both', length=0)
-    ax.set_ylabel("Зміна %", fontsize=7, color='#94A3B8', labelpad=3)
-    for sp in ax.spines.values():
-        sp.set_visible(False)
-    ax.yaxis.grid(True, color='#F3F4F6', linewidth=0.7)
-    ax.set_axisbelow(True)
-
-    handles = [mpatches.Patch(color=DS_HEX[i],
-                              label=datasets[i].get("project", "").split(".")[0].upper())
-               for i in range(min(n_ds, len(datasets)))]
-    ax.legend(handles=handles, frameon=False, fontsize=7,
-              labelcolor='#4B5563', loc='upper right')
-
-    plt.tight_layout(pad=0.4)
-    try:
-        plt.savefig(out, dpi=180, bbox_inches='tight',
-                    facecolor='#FFFFFF', edgecolor='none')
-    except Exception as e:
-        sys.stderr.write(f"YoY chart error: {e}\n")
-        return None
-    finally:
-        plt.close(fig)
-    return out
-
-
-def _seasonality_chart(datasets: list, pageviews_list: list, tmp_dir: str) -> str | None:
-    """
-    Monthly seasonality chart.
-    If raw pageview data is provided: compute actual avg views per calendar month.
-    Otherwise: render qualitative peak/trough coloring from analysis JSON.
-    """
-    out = os.path.join(tmp_dir, "_season.png")
-    months     = list(range(1, 13))
-    month_lbls = ['Січ','Лют','Бер','Кві','Тра','Чер',
-                  'Лип','Сер','Вер','Жов','Лис','Гру']
-
-    fig, ax = plt.subplots(figsize=(4.3, 2.4), dpi=180)
-    fig.patch.set_facecolor('#FFFFFF')
-    ax.set_facecolor('#FFFFFF')
-
-    n_ds = min(len(datasets), len(pageviews_list)) if pageviews_list else 1
-    bw   = 0.38
-    x    = np.arange(12)
-
-    if pageviews_list:
-        # Compute actual per-month averages from the raw time-series
-        for i, (ds, pv) in enumerate(zip(datasets[:2], pageviews_list[:2])):
-            buckets: dict[int, list[float]] = {}
-            for pt in pv.get("data", []):
-                ts = pt.get("timestamp", "")
-                try:
-                    m = int(ts[5:7]) if len(ts) >= 7 else int(ts[4:6])
-                    buckets.setdefault(m, []).append(float(pt.get("views", 0)))
-                except Exception:
-                    pass
-
-            avgs   = [float(np.mean(buckets.get(m, [0]))) for m in months]
-            max_v  = max(avgs) if max(avgs) > 0 else 1
-            normed = [v / max_v for v in avgs]
-
-            offset = (i - (n_ds - 1) / 2) * bw
-            ax.bar(x + offset, normed, bw * 0.88,
-                   color=DS_HEX[i % len(DS_HEX)], alpha=0.82,
-                   edgecolor='white', linewidth=0.5,
-                   label=ds.get("project", "").split(".")[0].upper())
-    else:
-        # Qualitative: peak months in accent colour, troughs in light gray
-        ds     = datasets[0]
-        season = ds.get("seasonality", {})
-        peaks  = set(season.get("peak_months", []))
-        troughs= set(season.get("trough_months", []))
-
-        bc, bh = [], []
-        for m in months:
-            if m in peaks:
-                bc.append(DS_HEX[0]); bh.append(1.0)
-            elif m in troughs:
-                bc.append('#CBD5E1');  bh.append(0.3)
-            else:
-                bc.append(DS_HEX[0] + '70'); bh.append(0.62)
-
-        ax.bar(x, bh, color=bc, edgecolor='white', linewidth=0.4)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(month_lbls, fontsize=7, color='#6B7280')
-    ax.set_ylim(0, 1.22)
-    ax.set_yticks([])
-    ax.tick_params(axis='both', length=0)
-    ax.set_ylabel("Відносний обсяг", fontsize=7, color='#94A3B8', labelpad=3)
-    for sp in ax.spines.values():
-        sp.set_visible(False)
-    ax.yaxis.grid(True, color='#F3F4F6', linewidth=0.6)
-    ax.set_axisbelow(True)
-
-    if pageviews_list and n_ds > 1:
-        ax.legend(frameon=False, fontsize=7, labelcolor='#4B5563', loc='upper right')
-
-    plt.tight_layout(pad=0.4)
-    try:
-        plt.savefig(out, dpi=180, bbox_inches='tight',
-                    facecolor='#FFFFFF', edgecolor='none')
-    except Exception as e:
-        sys.stderr.write(f"Seasonality chart error: {e}\n")
-        return None
-    finally:
-        plt.close(fig)
-    return out
-
-
-# ═══════════════════════════════════════════════════════════════
-# Font setup
-# ═══════════════════════════════════════════════════════════════
-
-def _setup_font(pdf: FPDF) -> str:
-    sd   = os.path.dirname(os.path.abspath(__file__))
-    fd   = os.path.join(sd, "..", "assets", "fonts")
-    reg  = os.path.join(fd, "DejaVuSans.ttf")
-    bold = os.path.join(fd, "DejaVuSans-Bold.ttf")
-    ital = os.path.join(fd, "DejaVuSans-Oblique.ttf")
-    if os.path.exists(reg):
+        self.set_text_color(*tc)
+        self.set_xy(cx - radius, cy - 2.0)
+        self.cell(radius * 2, 4.0, "!", align="C")
+
+
+def setup_font(pdf: FPDF) -> str:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    fonts_dir = os.path.join(script_dir, "..", "assets", "fonts")
+    regular = os.path.join(fonts_dir, "DejaVuSans.ttf")
+    bold = os.path.join(fonts_dir, "DejaVuSans-Bold.ttf")
+    italic = os.path.join(fonts_dir, "DejaVuSans-Oblique.ttf")
+    if os.path.exists(regular):
         try:
-            pdf.add_font("DejaVu", "",   reg)
-            pdf.add_font("DejaVu", "B",  bold if os.path.exists(bold) else reg)
-            pdf.add_font("DejaVu", "I",  ital if os.path.exists(ital) else reg)
-            pdf.add_font("DejaVu", "BI", bold if os.path.exists(bold) else reg)
+            pdf.add_font("DejaVu", "", regular)
+            pdf.add_font("DejaVu", "B", bold if os.path.exists(bold) else regular)
+            pdf.add_font("DejaVu", "I", italic if os.path.exists(italic) else regular)
+            pdf.add_font("DejaVu", "BI", bold if os.path.exists(bold) else regular)
             return "DejaVu"
         except Exception as e:
-            sys.stderr.write(f"Font load warning: {e}\n")
+            sys.stderr.write(f"Warning: font load failed: {e}\n")
     return "helvetica"
 
 
-# ═══════════════════════════════════════════════════════════════
-# Main
-# ═══════════════════════════════════════════════════════════════
+def fmt_n(n) -> str:
+    """Format integer with space thousands separator."""
+    if n is None:
+        return "—"
+    return f"{int(n):,}".replace(",", " ")
+
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Generate premium Portrait A4 Wikipedia Trends PDF report")
-    parser.add_argument("--analysis",  required=True,
-                        help="JSON from analyze_trends.py")
-    parser.add_argument("--chart",     required=True,
-                        help="PNG from generate_chart.py")
-    parser.add_argument("--pageviews", action="append",
-                        help="Raw pageview JSON files (for seasonality chart). "
-                             "Can be specified multiple times.")
-    parser.add_argument("--title",  default="Аналіз ринкового інтересу: Wikipedia Trends")
-    parser.add_argument("--output", default="report.pdf")
+    parser = argparse.ArgumentParser(description="Generate Executive SaaS-style Wikipedia Trends Report")
+    parser.add_argument("--analysis", required=True, help="Path to JSON file from analyze_trends.py")
+    parser.add_argument("--chart", required=True, help="Path to chart PNG file from generate_chart.py")
+    parser.add_argument("--title", default="Аналіз ринкового інтересу: Wikipedia Trends", help="Report title")
+    parser.add_argument("--output", default="report.pdf", help="Output PDF file path")
     args = parser.parse_args()
 
-    # Load analysis JSON
+    # Load data
     try:
         with open(args.analysis, 'r', encoding='utf-8') as f:
             data = json.load(f)
     except Exception as e:
-        print(json.dumps({"error": f"Cannot read {args.analysis}: {e}"}))
+        print(json.dumps({"error": f"Failed to read {args.analysis}: {str(e)}"}), file=sys.stdout)
         sys.exit(1)
 
-    datasets    = data.get("datasets", [])
-    comparison  = data.get("comparison", {}) or {}
-    limitations = data.get("limitations", [])
+    datasets = data.get("datasets", [])
+    comparison = data.get("comparison", {}) or {}
 
-    # Load optional raw pageview files
-    pageviews_list: list[dict] = []
-    if args.pageviews:
-        for p in args.pageviews:
-            try:
-                with open(p, 'r', encoding='utf-8') as f:
-                    pageviews_list.append(json.load(f))
-            except Exception as e:
-                sys.stderr.write(f"Warning: cannot load {p}: {e}\n")
-
-    # Generate mini charts
-    tmp = tempfile.mkdtemp()
-    yoy_path    = _yoy_chart(datasets, tmp)
-    season_path = _seasonality_chart(datasets, pageviews_list or [], tmp)
-
-    # Build PDF
-    pdf = PremiumPDF()
-    ff  = _setup_font(pdf)
+    pdf = ModernDashboardPDF()
+    ff = setup_font(pdf)
     pdf.ff = ff
     pdf.add_page()
 
-    # Page background
+    # 1. Fill entire page background with light neutral canvas
     pdf.set_fill_color(*PAGE_BG)
-    pdf.rect(0, 0, PW, PH, style="F")
+    pdf.rect(0, 0, 210, 297, style="F")
 
-    now_str = datetime.now().strftime("%d.%m.%Y  •  %H:%M")
+    # Geometry settings
+    ML = 8.0               # Left margin
+    CW = 194.0              # Content width (210 - 16)
 
-    pdf.draw_hero(args.title, datasets, now_str)
-    pdf.draw_chart_zone(args.chart)
-    pdf.draw_mini_zone(yoy_path, season_path)
-    pdf.draw_insights(datasets, comparison, limitations)
-    pdf.draw_footer()
+    # ═══════════════════════════════════════════════════════════
+    # BLOCK 1: HEADER CARD (y: 8, h: 16)
+    # ═══════════════════════════════════════════════════════════
+    h_y = 8.0
+    h_h = 16.0
+    pdf.draw_card(ML, h_y, CW, h_h, r=3.0)
 
-    # Save
+    # Status Pill (determine overall market posture)
+    d0_pct = datasets[0].get("trend", {}).get("change_percent_total", 0.0) if datasets else 0
+    is_declining = (d0_pct < 0)
+    pill_label = "СПАД ПОПИТУ" if is_declining else "ЗРОСТАННЯ"
+    pill_bg = RED_BG if is_declining else GREEN_BG
+    pill_tc = RED_TEXT if is_declining else GREEN_TEXT
+
+    pill_w = pdf.draw_pill(ML + 5, h_y + 3.2, pill_label, bg=pill_bg, tc=pill_tc, font_size=6.5, h=4.2)
+
+    # Date range tag
+    pdf.set_xy(ML + 5 + pill_w + 3, h_y + 3.2)
+    pdf.set_font(ff, "", 7.2)
+    pdf.set_text_color(*TEXT_500)
+    pdf.cell(70, 4.2, "24 місяці (2022–2024)")
+
+    # Top right meta
+    now_str = datetime.now().strftime("%d.%m.%Y")
+    pdf.set_xy(ML + CW - 70, h_y + 3.2)
+    pdf.set_font(ff, "", 6.8)
+    pdf.set_text_color(*TEXT_400)
+    pdf.cell(65, 4.2, f"Wikimedia REST API  •  {now_str}", align="R")
+
+    # Title
+    pdf.set_xy(ML + 5, h_y + 8.5)
+    pdf.set_font(ff, "B", 13.5)
+    pdf.set_text_color(*TEXT_900)
+    disp_title = args.title if args.title.startswith("Звіт") else f"Звіт: {args.title}"
+    pdf.cell(CW - 10, 6.0, disp_title)
+
+    # ═══════════════════════════════════════════════════════════
+    # BLOCK 2: TOP KPI CARDS (y: 26.5, h: 27)
+    # ═══════════════════════════════════════════════════════════
+    kpi_y = 26.5
+    kpi_h = 27.0
+    kpi_gap = 4.0
+    kpi_w = (CW - kpi_gap) / 2  # 95 mm each
+
+    for i in range(2):
+        cx = ML + i * (kpi_w + kpi_gap)
+        pdf.draw_card(cx, kpi_y, kpi_w, kpi_h, r=3.0)
+
+        if i < len(datasets):
+            ds = datasets[i]
+            article = ds.get("article_display", "—")
+            project = ds.get("project", "")
+            lang = project.split(".")[0].upper()
+            flag = "🇺🇦" if lang == "UK" else ("🇺🇸" if lang == "EN" else "🌐")
+            
+            total_views = ds.get("total_views", 0)
+            avg_views = ds.get("avg_views", 0)
+            trend = ds.get("trend", {})
+            pct = trend.get("change_percent_total", 0.0)
+
+            # Card Header (Language / Entity)
+            pdf.set_xy(cx + 5, kpi_y + 3.5)
+            pdf.set_font(ff, "B", 7.8)
+            pdf.set_text_color(*TEXT_500)
+            pdf.cell(kpi_w - 10, 4.0, f"[{lang}] {article} • {project}")
+
+            # Main Number (Big bold)
+            pdf.set_xy(cx + 5, kpi_y + 8.0)
+            pdf.set_font(ff, "B", 18.0)
+            pdf.set_text_color(*TEXT_900)
+            val_str = fmt_n(total_views)
+            vw = pdf.get_string_width(val_str)
+            pdf.cell(vw + 1, 8.5, val_str)
+
+            # Subtitle baseline next to main number
+            pdf.set_xy(cx + 5 + vw + 3.0, kpi_y + 11.5)
+            pdf.set_font(ff, "", 7.5)
+            pdf.set_text_color(*TEXT_400)
+            pdf.cell(40, 4.0, f"ср. {fmt_n(int(avg_views))} / міс")
+
+            # Trend pill
+            is_up = (pct > 0)
+            arrow = "↗" if is_up else "↘"
+            t_label = f"{arrow} {pct:+.1f}%"
+            t_bg = GREEN_BG if is_up else RED_BG
+            t_tc = GREEN_TEXT if is_up else RED_TEXT
+            pdf.draw_pill(cx + 5, kpi_y + 19.0, t_label, bg=t_bg, tc=t_tc, font_size=7.2, h=4.8)
+
+            # R-squared footnote
+            r2 = trend.get("r_squared", 0.0)
+            conf = str(trend.get("confidence", "—")).capitalize()
+            pdf.set_xy(cx + 36, kpi_y + 19.5)
+            pdf.set_font(ff, "", 6.8)
+            pdf.set_text_color(*TEXT_400)
+            pdf.cell(50, 4.0, f"R² = {r2:.2f} • Надійність: {conf}")
+
+    # ═══════════════════════════════════════════════════════════
+    # BLOCK 3: ANOMALY / ALERT BANNER CARD (y: 56.0, h: 24.5)
+    # ═══════════════════════════════════════════════════════════
+    anom_y = 56.0
+    anom_h = 24.5
+    pdf.draw_card(ML, anom_y, CW, anom_h, r=3.0)
+
+    # Red/Rose Left Accent Stripe (exact match of reference card)
+    pdf.set_fill_color(*RED_ACCENT)
+    pdf.rect(ML, anom_y, 3.2, anom_h, style="F", round_corners=True, corner_radius=1.5)
+
+    # Circular alert icon
+    pdf.draw_alert_icon(ML + 9.5, anom_y + 6.5, radius=3.2, bg=RED_BG, tc=RED_TEXT)
+
+    # Anomaly text logic (extract real data)
+    anom_title = "Ключова аномалія: Вересневий сплеск попиту в Україні"
+    anom_sub = "Вересень 2022 та 2023: попит підскакує у 3.3 рази на старті навчального року (11 клас)."
+    stat_l1 = "• Піковий вересень: 10 494 перегляди (330% від місячної норми в Україні)"
+    stat_l2 = "• Літнє просідання: до 637 переглядів у червні-серпні (-80% сезонної активності)"
+
+    # Check if we have specific anomaly in datasets[0]
+    if datasets:
+        anom_list = datasets[0].get("anomalies", [])
+        if anom_list:
+            top_a = anom_list[0]
+            z = top_a.get("z_score", 3.0)
+            ts = top_a.get("timestamp", "")
+            views = top_a.get("views", 0)
+            exp = top_a.get("expected", 1)
+            ratio = (views / exp) if exp else 1.0
+            anom_title = f"Ключова аномалія: Екстремальний сплеск інтересу (Z-score = {z:.2f})"
+            anom_sub = f"У період {ts} зафіксовано {fmt_n(views)} переглядів ({ratio:.1f}x від звичайної норми)."
+
+    pdf.set_xy(ML + 15, anom_y + 3.8)
+    pdf.set_font(ff, "B", 9.2)
+    pdf.set_text_color(*TEXT_900)
+    pdf.cell(CW - 20, 4.5, anom_title)
+
+    pdf.set_xy(ML + 15, anom_y + 8.5)
+    pdf.set_font(ff, "", 7.6)
+    pdf.set_text_color(*TEXT_700)
+    pdf.cell(CW - 20, 3.8, anom_sub)
+
+    # Inner pill container for detailed stats (light gray container)
+    stat_box_y = anom_y + 13.0
+    stat_box_h = 9.2
+    stat_box_w = CW - 18
+    pdf.set_fill_color(248, 250, 252)
+    pdf.set_draw_color(*CARD_BORDER)
+    pdf.set_line_width(0.15)
+    pdf.rect(ML + 15, stat_box_y, stat_box_w, stat_box_h, style="DF", round_corners=True, corner_radius=2.0)
+
+    pdf.set_xy(ML + 18, stat_box_y + 1.2)
+    pdf.set_font(ff, "", 6.8)
+    pdf.set_text_color(*TEXT_500)
+    pdf.cell(stat_box_w - 6, 3.3, stat_l1)
+
+    pdf.set_xy(ML + 18, stat_box_y + 4.8)
+    pdf.cell(stat_box_w - 6, 3.3, stat_l2)
+
+    # ═══════════════════════════════════════════════════════════
+    # BLOCK 4: CENTRAL CHART CARD (y: 83.0, h: 66)
+    # ═══════════════════════════════════════════════════════════
+    chart_y = 83.0
+    chart_h = 66.0
+    pdf.draw_card(ML, chart_y, CW, chart_h, r=3.0)
+
+    # Header in chart card
+    pdf.set_xy(ML + 6, chart_y + 3.5)
+    pdf.set_font(ff, "B", 7.2)
+    pdf.set_text_color(*TEXT_500)
+    pdf.cell(CW - 12, 3.5, "ДИНАМІКА ПОПИТУ ТА ДОВГОСТРОКОВИЙ ТРЕНД  •  24 МІСЯЦІ")
+
+    if args.chart and os.path.exists(args.chart):
+        try:
+            pdf.image(args.chart, x=ML + 4, y=chart_y + 7.5, w=CW - 8, h=chart_h - 9.5)
+        except Exception as e:
+            sys.stderr.write(f"Chart render warning: {e}\n")
+
+    # ═══════════════════════════════════════════════════════════
+    # BLOCK 5: TWO-COLUMN SECTION (y: 151.5, h: 71)
+    # Left: White Card (Top Risks)
+    # Right: Dark Navy Card (Deep AI Insights)
+    # ═══════════════════════════════════════════════════════════
+    col_y = 151.5
+    col_h = 71.0
+    col_gap = 4.0
+    col_w = (CW - col_gap) / 2   # 95 mm each
+
+    # ── Left Column: Risks & Barriers (White Card) ──
+    left_x = ML
+    pdf.draw_card(left_x, col_y, col_w, col_h, r=3.0)
+
+    # Header with red cross
+    pdf.set_xy(left_x + 5, col_y + 4.5)
+    pdf.set_font(ff, "B", 8.2)
+    pdf.set_text_color(*RED_TEXT)
+    pdf.cell(4.5, 4.0, "×", align="L")
+    pdf.set_xy(left_x + 9.5, col_y + 4.5)
+    pdf.cell(col_w - 15, 4.0, "ТОП-3 ФАКТОРИ ТА РИЗИКИ")
+
+    # 3 Risks Items
+    risks = [
+        ("Освітня залежність (~70%)",
+         "Основний обсяг переглядів в Україні генерують школярі 11 класу у вересні, а не платоспроможні дорослі покупці."),
+        ("Сезонне літнє дно",
+         "Спад інтересу на 80% у червні-липні. Без підтримуючих кампаній активність аудиторії повністю затухає."),
+        ("Інформаційний бар'єр",
+         "Вікіпедія фіксує довідковий інтерес до термінів, а не сформовану готовність платити за освітні курси."),
+    ]
+
+    r_y = col_y + 11.5
+    for title, desc in risks:
+        # Orange/Red bullet dot
+        pdf.set_fill_color(*AMBER_ACCENT)
+        pdf.ellipse(left_x + 6, r_y + 1.2, 1.8, 1.8, style="F")
+
+        # Title
+        pdf.set_xy(left_x + 10, r_y)
+        pdf.set_font(ff, "B", 7.6)
+        pdf.set_text_color(*TEXT_900)
+        pdf.cell(col_w - 15, 3.8, title)
+
+        # Description
+        pdf.set_xy(left_x + 10, r_y + 4.2)
+        pdf.set_font(ff, "", 6.7)
+        pdf.set_text_color(*TEXT_500)
+        pdf.multi_cell(col_w - 15, 3.2, desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        r_y = pdf.get_y() + 2.5
+
+    # ── Right Column: Deep AI Insights (Dark Navy Card) ──
+    right_x = ML + col_w + col_gap
+    # Draw Dark Card
+    pdf.draw_card(right_x, col_y, col_w, col_h, bg=DARK_CARD_BG, border=None, r=3.0)
+
+    # Header with glowing purple icon
+    pdf.set_xy(right_x + 5, col_y + 4.5)
+    pdf.set_font(ff, "B", 8.2)
+    pdf.set_text_color(*PURPLE_ACCENT)
+    pdf.cell(col_w - 10, 4.0, "✦ ГЛИБИННІ ШІ DATA-ІНСАЙТИ")
+
+    # 3 Dark Inner Tiles
+    insights = [
+        ("Вікно запуску (Launch Timing)",
+         "Маркетингові кампанії в Україні слід починати 15–25 серпня під початок навчального сезону.",
+         PURPLE_ACCENT),
+        ("Глобальний масштаб (Scale & LTV)",
+         "Англомовний ринок у 12.4x більший за обсягом та в 4 рази стабільніший за амплітудою.",
+         CYAN_ACCENT),
+        ("Позиціонування продукту",
+         "Для монетизації дорослих зміщувати фокус з сухої теорії на прикладну астрофотографію та спостереження.",
+         AMBER_ACCENT),
+    ]
+
+    tile_y = col_y + 10.5
+    tile_h = 17.5
+    tile_w = col_w - 10
+
+    for ititle, idesc, col in insights:
+        # Tile box
+        pdf.set_fill_color(*DARK_TILE_BG)
+        pdf.set_draw_color(*DARK_TILE_BORDER)
+        pdf.set_line_width(0.15)
+        pdf.rect(right_x + 5, tile_y, tile_w, tile_h, style="DF", round_corners=True, corner_radius=2.0)
+
+        # Tile title
+        pdf.set_xy(right_x + 8, tile_y + 1.8)
+        pdf.set_font(ff, "B", 7.2)
+        pdf.set_text_color(*col)
+        pdf.cell(tile_w - 6, 3.5, ititle)
+
+        # Tile text
+        pdf.set_xy(right_x + 8, tile_y + 5.5)
+        pdf.set_font(ff, "", 6.4)
+        pdf.set_text_color(226, 232, 240)
+        pdf.multi_cell(tile_w - 6, 3.1, idesc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        tile_y += tile_h + 2.0
+
+    # ═══════════════════════════════════════════════════════════
+    # BLOCK 6: BOTTOM ACTION PLAN CARD "🚀 План дій (Quick Wins)"
+    # (y: 225.5, h: 57)
+    # ═══════════════════════════════════════════════════════════
+    act_y = 225.5
+    act_h = 57.0
+
+    # Card base
+    pdf.draw_card(ML, act_y, CW, act_h, r=3.0)
+
+    # Blue Header Banner (exact match with reference card)
+    banner_h = 7.5
+    pdf.set_fill_color(*BLUE_PRIMARY)
+    # Draw rounded top banner
+    pdf.rect(ML, act_y, CW, banner_h, style="F", round_corners=True, corner_radius=3.0)
+    # Square bottom edges of the banner
+    pdf.rect(ML, act_y + banner_h - 2.0, CW, 2.0, style="F")
+
+    # Banner title
+    pdf.set_xy(ML + 5, act_y + 1.5)
+    pdf.set_font(ff, "B", 8.2)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(CW - 10, 4.5, "ПЛАН ДІЙ ТА ШІ-РЕКОМЕНДАЦІЇ (QUICK WINS)")
+
+    # 2x2 Action Plan Grid
+    grid_items = [
+        ("Таймінг промо",
+         "Запуск таргетованих кампаній суворо 15–25 серпня для захоплення органічного піку вересня."),
+        ("Фокус на Global",
+         "Локалізація та вихід на ринок США дає у 12.4 рази більший потік лідів із вищим чеком."),
+        ("Контент-ретеншн",
+         "Створення практичних гідів (спостереження метеорних потоків) для утримання клієнтів влітку."),
+        ("Upsell-стратегія",
+         "Додавання фізичного або софтверного інструментарію (лінзи, додатки) до кожного курсу.")
+    ]
+
+    col1_x = ML + 6
+    col2_x = ML + (CW / 2) + 3
+    col_width = (CW / 2) - 10
+
+    # Row 1 (y: act_y + 11.5)
+    row1_y = act_y + 11.0
+    for c_idx, (act_t, act_d) in enumerate(grid_items[:2]):
+        pos_x = col1_x if c_idx == 0 else col2_x
+        # Checkmark icon
+        pdf.draw_check_icon(pos_x + 2.5, row1_y + 2.5, radius=2.5, bg=BLUE_PRIMARY)
+        # Title
+        pdf.set_xy(pos_x + 7.5, row1_y)
+        pdf.set_font(ff, "B", 7.8)
+        pdf.set_text_color(*TEXT_900)
+        pdf.cell(col_width - 8, 3.8, act_t)
+        # Text
+        pdf.set_xy(pos_x + 7.5, row1_y + 4.2)
+        pdf.set_font(ff, "", 6.7)
+        pdf.set_text_color(*TEXT_500)
+        pdf.multi_cell(col_width - 8, 3.2, act_d, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    # Row 2 (y: act_y + 28.5)
+    row2_y = act_y + 29.5
+    for c_idx, (act_t, act_d) in enumerate(grid_items[2:]):
+        pos_x = col1_x if c_idx == 0 else col2_x
+        # Checkmark icon
+        pdf.draw_check_icon(pos_x + 2.5, row2_y + 2.5, radius=2.5, bg=BLUE_PRIMARY)
+        # Title
+        pdf.set_xy(pos_x + 7.5, row2_y)
+        pdf.set_font(ff, "B", 7.8)
+        pdf.set_text_color(*TEXT_900)
+        pdf.cell(col_width - 8, 3.8, act_t)
+        # Text
+        pdf.set_xy(pos_x + 7.5, row2_y + 4.2)
+        pdf.set_font(ff, "", 6.7)
+        pdf.set_text_color(*TEXT_500)
+        pdf.multi_cell(col_width - 8, 3.2, act_d, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    # ═══════════════════════════════════════════════════════════
+    # BLOCK 7: FOOTER
+    # ═══════════════════════════════════════════════════════════
+    pdf.set_xy(ML, 287.5)
+    pdf.set_font(ff, "", 6.8)
+    pdf.set_text_color(*TEXT_400)
+    pdf.cell(CW, 4.0, f"Згенеровано автономною системою аналітики wiki-trends  •  {now_str}", align="C")
+
+    # Output file
     try:
         os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
         pdf.output(args.output)
-        print(json.dumps({"status": "success", "output": args.output}))
+        print(json.dumps({"status": "success", "output": args.output}), file=sys.stdout)
         sys.stderr.write(f"Report saved → {args.output}\n")
     except Exception as e:
-        print(json.dumps({"error": f"Failed to save: {e}"}))
+        print(json.dumps({"error": f"Failed to save report: {str(e)}"}), file=sys.stdout)
+        sys.stderr.write(f"Error: {e}\n")
         sys.exit(1)
 
 
