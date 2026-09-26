@@ -48,14 +48,14 @@ def calculate_linear_trend(views):
     n_points = len(views)
     
     if r_squared > 0.7 and n_points > 24:
-        confidence = "high"
-        expl = f"Strong R² ({r_squared:.2f}) with {n_points} points indicates a reliable trend."
+        confidence = "висока"
+        expl = f"Високий R² ({r_squared:.2f}) на {n_points} точках вказує на стійкий та надійний тренд."
     elif r_squared > 0.4 or n_points > 12:
-        confidence = "medium"
-        expl = f"Moderate R² ({r_squared:.2f}) with {n_points} points suggests a visible trend with some variance."
+        confidence = "середня"
+        expl = f"Помірний R² ({r_squared:.2f}) на {n_points} точках вказує на помітний тренд із коливаннями."
     else:
-        confidence = "low"
-        expl = f"Low R² ({r_squared:.2f}) or insufficient points ({n_points}) indicates weak trend reliability."
+        confidence = "низька"
+        expl = f"Низький R² ({r_squared:.2f}) або недостатньо даних ({n_points}) свідчить про слабку надійність тренду."
         
     return {
         "direction": direction,
@@ -128,9 +128,9 @@ def detect_seasonality(data_list):
     detected = len(peaks) > 0 or len(troughs) > 0
     
     if detected:
-        expl = f"Found significant variation across months."
+        expl = f"Виявлено суттєві сезонні коливання інтересу між місяцями."
     else:
-        expl = "No strong seasonality detected."
+        expl = "Вираженої сезонності не виявлено."
         
     return {
         "detected": detected,
@@ -160,7 +160,7 @@ def detect_anomalies(data_list):
                 "views": v,
                 "expected": round(mean, 2),
                 "z_score": round(z, 2),
-                "type": "spike" if z > 0 else "drop"
+                "type": "сплеск" if z > 0 else "провал"
             })
             
     return anomalies
@@ -227,7 +227,7 @@ def compare_datasets(results):
                 "avg_monthly_views": avg
             }
             
-    rec = f"The dataset {fastest_growing['project']} shows the fastest relative growth. The largest audience is found on {largest_audience['project']}."
+    rec = f"Найшвидше відносне зростання показує {fastest_growing['project']}. Найбільшу загальну аудиторію має {largest_audience['project']}."
     
     return {
         "fastest_growing": fastest_growing,
@@ -257,10 +257,10 @@ def main():
     output = {
         "datasets": datasets,
         "limitations": [
-            "Wikipedia page views reflect reading interest, not necessarily purchase intent or willingness to pay.",
-            "Views may be influenced by external events (news, social media) creating temporary spikes.",
-            "Smaller Wikipedia editions may have noisier data due to lower absolute view counts.",
-            "Bot traffic is filtered (agent=user), but some automated views may still be included."
+            "Перегляди сторінок Вікіпедії відображають інформаційний інтерес, а не пряму готовність платити за продукт.",
+            "На перегляди можуть суттєво впливати зовнішні медійні події, створюючи тимчасові неорганічні сплески.",
+            "Менші мовні розділи Вікіпедії мають вищу статистичну волатильність через менший обсяг вибірки.",
+            "Трафік ботів відфільтровано (agent=user), проте частина автоматизованих переглядів може залишатися."
         ]
     }
     

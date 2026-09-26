@@ -99,8 +99,8 @@ def main():
                 plt.plot(parsed_dates, p(x_num), linestyle='--', color=ds["color"], alpha=0.5)
 
     plt.title(args.title)
-    plt.xlabel("Date")
-    plt.ylabel("Views")
+    plt.xlabel("Дата")
+    plt.ylabel("Кількість переглядів")
     
     plt.gca().yaxis.set_major_formatter(matplotlib.ticker.StrMethodFormatter('{x:,.0f}'))
     plt.grid(axis='y', linestyle='--', alpha=0.7)
