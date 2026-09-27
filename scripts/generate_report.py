@@ -316,23 +316,23 @@ def build_signals_from_data(datasets: list) -> list[tuple[str, str]]:
 
 
 def build_limitations_from_data(limitations: list) -> list[tuple[str, str]]:
-    """Build Column 3 (Limitations) with substantive methodological explanations."""
+    """Build Column 3 (Limitations) with concise methodological explanations that fit within balanced margins."""
     items = [
         (
             "Інтерес ≠ прямий попит",
-            smart_wrap_uk("Перегляди сторінок Вікіпедії свідчать про інформаційну цікавість, а не про готовність платити за комерційні продукти.")
+            smart_wrap_uk("Перегляди відображають інформаційний інтерес, а не готовність купувати комерційні продукти.")
         ),
         (
-            "Медійні та зовнішні сплески",
-            smart_wrap_uk("Зовнішні інфоприводи, заяви чи резонансні події можуть створювати короткочасні сплески, що не є стійким трендом.")
+            "Медійні та новинні сплески",
+            smart_wrap_uk("Зовнішні інфоприводи чи суспільні події створюють тимчасовий неорганічний шум у динаміці.")
         ),
         (
-            "Мовні відмінності вибірки",
-            smart_wrap_uk("Локальні мовні розділи мають менший трафік і вищу статистичну волатильність порівняно з глобальним англійським розділом.")
+            "Волатильність локальних версій",
+            smart_wrap_uk("Розділи з меншою аудиторією мають вищу статистичну похибку та чутливість до поодиноких сплесків.")
         ),
         (
-            "Фільтрація бот-трафіку",
-            smart_wrap_uk("Дані зібрано з фільтром agent=user, проте незначна частка автоматизованих запитів може залишатися у статистиці.")
+            "Фільтрація бот-трафіку (agent=user)",
+            smart_wrap_uk("Трафік ботів відфільтровано, проте невелика частка автоматизованих запитів може залишатися у вибірці.")
         )
     ]
     return items
@@ -519,17 +519,29 @@ def main():
         badge_bg = (238, 242, 255) if i == 0 else (255, 241, 242) if i == 1 else (240, 253, 250)
         lpw = pdf.draw_pill(ML + 6.0, cy + 4.0, text=lang, bg=badge_bg, tc=accent_c, font_size=6.8, bold=True, h=4.6)
 
-        # Article Title (Left)
+        # Article Title (Left) with adaptive sizing
+        avail_art_w = COL_W - lpw - 38.0
+        art_font_size = 9.5
+        pdf.set_font(ff, "B", art_font_size)
+        while pdf.get_string_width(article) > avail_art_w and art_font_size > 7.6:
+            art_font_size -= 0.4
+            pdf.set_font(ff, "B", art_font_size)
+
+        art_disp = article
+        if pdf.get_string_width(art_disp) > avail_art_w:
+            while len(art_disp) > 3 and pdf.get_string_width(art_disp + "…") > avail_art_w:
+                art_disp = art_disp[:-1]
+            art_disp += "…"
+
         pdf.set_xy(ML + 6.0 + lpw + 2.5, cy + 4.0)
-        pdf.set_font(ff, "B", 9.8)
         pdf.set_text_color(*TEXT_900)
-        pdf.cell(42.0, 4.6, article)
+        pdf.cell(avail_art_w, 4.6, art_disp)
 
         # Domain Badge (Right-aligned, utilizes right side of card!)
-        pdf.set_xy(ML + COL_W - 36.0, cy + 4.2)
-        pdf.set_font(ff, "", 7.5)
+        pdf.set_xy(ML + COL_W - 35.0, cy + 4.2)
+        pdf.set_font(ff, "", 7.2)
         pdf.set_text_color(*TEXT_400)
-        pdf.cell(30.0, 4.2, project, align="R")
+        pdf.cell(29.0, 4.2, project, align="R")
 
         # Subtle card divider line
         pdf.set_draw_color(*DIVIDER_LINE)
