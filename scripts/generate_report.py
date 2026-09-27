@@ -5,19 +5,25 @@
 # ]
 # ///
 """
-generate_report.py — Swiss Modular Grid Landscape A4 Wikipedia Trends Report.
-Features:
-- Perfect 1:2 architectural grid alignment:
-  - Top row: [ KPI Cards: 1/3 width (88mm) ] [ Main Chart: 2/3 width (180.5mm) ]
-  - Bottom row: [ Col 1: 1/3 (88mm) ] [ Col 2: 1/3 (88mm) ] [ Col 3: 1/3 (88mm) ]
-- Clean executive header without technical clutter (no agent=user, CC BY-SA, or extra tags)
-- Clear, practical Product Decision Memo in Column 1
-- Detailed signals & seasonality in Column 2
-- Explicit assumptions & methodology limitations in Column 3
-- Full page utilization without wasted space
+generate_report.py — Executive Landscape A4 Wikipedia Trends Report.
+
+All text in the three analytical columns is generated DYNAMICALLY from the
+analysis JSON produced by analyze_trends.py. No hardcoded topic names,
+no fabricated interpretations.
+
+Optional: pass --insights <file.json> with LLM-generated deeper product
+insights to enrich Column 1 (Product Decision). The insights JSON schema:
+{
+  "decision_summary": "...",
+  "bullets": [
+    {"title": "...", "text": "..."},
+    ...
+  ]
+}
 """
 import argparse
 import json
+import math
 import os
 import sys
 from datetime import datetime
@@ -28,36 +34,38 @@ from fpdf.enums import XPos, YPos
 # ═══════════════════════════════════════════════════════════════
 # Design Tokens
 # ═══════════════════════════════════════════════════════════════
-PAGE_BG         = (248, 250, 252)   # Soft neutral canvas (#F8FAFC)
-CARD_BG         = (255, 255, 255)   # Pure white
-CARD_BORDER     = (226, 232, 240)   # Slate 200 border (#E2E8F0)
-CARD_SHADOW     = (238, 242, 246)   # Subtle drop-shadow tone
+PAGE_BG         = (248, 250, 252)
+CARD_BG         = (255, 255, 255)
+CARD_BORDER     = (226, 232, 240)
+CARD_SHADOW     = (238, 242, 246)
 
-TEXT_900        = (15,  23,  42)    # Slate 900 (primary headings, big numbers)
-TEXT_700        = (51,  65,  85)    # Slate 700 (body copy)
-TEXT_500        = (100, 116, 139)   # Slate 500 (labels, subtitles)
-TEXT_400        = (148, 163, 184)   # Slate 400 (secondary metadata)
+TEXT_900        = (15,  23,  42)
+TEXT_700        = (51,  65,  85)
+TEXT_500        = (100, 116, 139)
+TEXT_400        = (148, 163, 184)
 
-# Section Accent Colors
-INDIGO_PRIMARY  = (79,  70,  229)   # #4F46E5 (Indigo 600 - Business Decision)
-INDIGO_BG       = (238, 242, 255)   # #EEF2FF
-TEAL_PRIMARY    = (13,  148, 136)   # #0D9488 (Teal 600 - Signals & Anomalies)
-TEAL_BG         = (240, 253, 250)   # #F0FDFA
-SLATE_PRIMARY   = (100, 116, 139)   # #64748B (Slate 500 - Limitations)
+INDIGO_PRIMARY  = (79,  70,  229)
+INDIGO_BG       = (238, 242, 255)
+TEAL_PRIMARY    = (13,  148, 136)
+SLATE_PRIMARY   = (100, 116, 139)
 
-# Trends
-GREEN_BG        = (220, 252, 231)   # #DCFCE7
-GREEN_TEXT      = (22,  101, 52)    # #166534
-RED_BG          = (254, 226, 226)   # #FEE2E2
-RED_TEXT        = (159, 18,  57)    # #9F1239
+GREEN_BG        = (220, 252, 231)
+GREEN_TEXT      = (22,  101, 52)
+RED_BG          = (254, 226, 226)
+RED_TEXT        = (159, 18,  57)
 
-# Dataset Accents (Royal Blue for UK, Rose for EN/Global)
 DS_ACCENTS      = [
-    (37,  99,  235),  # Royal Blue (#2563EB)
-    (244, 63,  94),   # Rose (#F43F5E)
-    (13,  148, 136),  # Teal
-    (245, 158, 11),   # Amber
+    (37,  99,  235),
+    (244, 63,  94),
+    (13,  148, 136),
+    (245, 158, 11),
 ]
+
+MONTH_NAMES_UK = {
+    1: "січень", 2: "лютий", 3: "березень", 4: "квітень",
+    5: "травень", 6: "червень", 7: "липень", 8: "серпень",
+    9: "вересень", 10: "жовтень", 11: "листопад", 12: "грудень"
+}
 
 
 class ExecutiveGridPDF(FPDF):
@@ -67,7 +75,6 @@ class ExecutiveGridPDF(FPDF):
         self.set_auto_page_break(auto=False)
 
     def draw_card(self, x, y, w, h, bg=CARD_BG, border=CARD_BORDER, r=3.5, shadow=True):
-        """Draw card with soft rounded corners and subtle drop-shadow."""
         if shadow:
             self.set_fill_color(*CARD_SHADOW)
             self.rect(x + 0.35, y + 0.65, w, h, style="F", round_corners=True, corner_radius=r)
@@ -80,7 +87,6 @@ class ExecutiveGridPDF(FPDF):
             self.rect(x, y, w, h, style="F", round_corners=True, corner_radius=r)
 
     def draw_pill(self, x, y, text, bg=INDIGO_BG, tc=INDIGO_PRIMARY, font_size=7.2, bold=True, h=5.2):
-        """Draw rounded pill badge."""
         self.set_font(self.ff, "B" if bold else "", font_size)
         pw = self.get_string_width(text) + 6.0
         self.set_fill_color(*bg)
@@ -91,7 +97,6 @@ class ExecutiveGridPDF(FPDF):
         return pw
 
     def draw_number_badge(self, cx, cy, radius, text, bg=INDIGO_PRIMARY, tc=(255, 255, 255)):
-        """Draw small circular number badge for column headers."""
         self.set_fill_color(*bg)
         self.ellipse(cx - radius, cy - radius, radius * 2, radius * 2, style="F")
         self.set_font(self.ff, "B", 7.5)
@@ -119,18 +124,224 @@ def setup_font(pdf: FPDF) -> str:
 
 
 def fmt_n(n) -> str:
-    """Format integer with space thousands separator (Ukrainian convention)."""
     if n is None:
         return "—"
     return f"{int(n):,}".replace(",", " ")
 
 
+def fmt_months(months: list[int]) -> str:
+    """Convert list of month numbers to Ukrainian month names."""
+    return ", ".join(MONTH_NAMES_UK.get(m, str(m)) for m in months[:4])
+
+
+# ═══════════════════════════════════════════════════════════════
+# Dynamic Text Generators (100% from analysis JSON)
+# ═══════════════════════════════════════════════════════════════
+
+def build_decision_from_data(datasets: list, comparison: dict) -> tuple[str, list[tuple[str, str]]]:
+    """Build Column 1 (Product Decision) entirely from analysis data."""
+    if len(datasets) < 2:
+        ds = datasets[0] if datasets else {}
+        art = ds.get("article_display", "—")
+        trend = ds.get("trend", {})
+        pct = trend.get("change_percent_total", 0)
+        direction = "зростає" if pct > 0 else "спадає"
+        summary = (
+            f"Тема «{art}» демонструє тренд, який {direction} ({pct:+.1f}%) "
+            f"за період спостереження. Загальний обсяг переглядів: {fmt_n(ds.get('total_views', 0))}, "
+            f"середній помісячний попит: {fmt_n(int(ds.get('avg_views', 0)))} переглядів/міс."
+        )
+        bullets = []
+        r2 = trend.get("r_squared", 0)
+        if r2 < 0.3:
+            bullets.append(("Стабільність тренду", f"R² = {r2:.2f} — тренд нестабільний, дані мають високу волатильність. Рішення потребує додаткової перевірки."))
+        return summary, bullets
+
+    # Two or more datasets — compare
+    ds0, ds1 = datasets[0], datasets[1]
+    avg0, avg1 = ds0.get("avg_views", 1), ds1.get("avg_views", 1)
+    total0, total1 = ds0.get("total_views", 0), ds1.get("total_views", 0)
+    pct0 = ds0.get("trend", {}).get("change_percent_total", 0)
+    pct1 = ds1.get("trend", {}).get("change_percent_total", 0)
+    art0 = ds0.get("article_display", "—")
+    art1 = ds1.get("article_display", "—")
+    proj0 = ds0.get("project", "").split(".")[0].upper()
+    proj1 = ds1.get("project", "").split(".")[0].upper()
+
+    # Determine larger market
+    if avg1 > avg0:
+        larger, smaller = ds1, ds0
+        l_proj, s_proj = proj1, proj0
+        ratio = avg1 / max(avg0, 1)
+    else:
+        larger, smaller = ds0, ds1
+        l_proj, s_proj = proj0, proj1
+        ratio = avg0 / max(avg1, 1)
+
+    l_avg = int(larger.get("avg_views", 0))
+    s_avg = int(smaller.get("avg_views", 0))
+    l_pct = larger.get("trend", {}).get("change_percent_total", 0)
+    s_pct = smaller.get("trend", {}).get("change_percent_total", 0)
+
+    # Both declining?
+    both_declining = (pct0 < 0 and pct1 < 0)
+    one_growing = (pct0 > 0) != (pct1 > 0)
+
+    if both_declining:
+        summary = (
+            f"Обидва ринки демонструють спадний тренд: "
+            f"{proj0} ({pct0:+.1f}%) та {proj1} ({pct1:+.1f}%). "
+            f"Ринок {l_proj} у {ratio:.1f}x більший за обсягом "
+            f"({fmt_n(l_avg)} проти {fmt_n(s_avg)} переглядів/міс)."
+        )
+    elif one_growing:
+        growing_ds = ds0 if pct0 > 0 else ds1
+        g_proj = proj0 if pct0 > 0 else proj1
+        g_pct = pct0 if pct0 > 0 else pct1
+        summary = (
+            f"Ринок {g_proj} демонструє зростання ({g_pct:+.1f}%), "
+            f"тоді як інший ринок спадає. "
+            f"За обсягом {l_proj} у {ratio:.1f}x більший "
+            f"({fmt_n(l_avg)} проти {fmt_n(s_avg)} переглядів/міс)."
+        )
+    else:
+        summary = (
+            f"Обидва ринки зростають: "
+            f"{proj0} ({pct0:+.1f}%) та {proj1} ({pct1:+.1f}%). "
+            f"За обсягом {l_proj} у {ratio:.1f}x більший "
+            f"({fmt_n(l_avg)} проти {fmt_n(s_avg)} переглядів/міс)."
+        )
+
+    # Build bullets from data
+    bullets = []
+
+    # Bullet 1: Market priority (based on volume ratio)
+    if ratio >= 2.0:
+        bullets.append((
+            "Пріоритет ринку",
+            f"Ринок {l_proj} має попит у {ratio:.1f}x більший ({fmt_n(l_avg)} проти {fmt_n(s_avg)}/міс). "
+            f"За обсягом він є пріоритетним для масштабування."
+        ))
+
+    # Bullet 2: Trend stability (based on R²)
+    r2_0 = ds0.get("trend", {}).get("r_squared", 0)
+    r2_1 = ds1.get("trend", {}).get("r_squared", 0)
+    more_stable = proj0 if r2_0 > r2_1 else proj1
+    less_stable = proj1 if r2_0 > r2_1 else proj0
+    if abs(r2_0 - r2_1) > 0.1:
+        bullets.append((
+            "Стабільність попиту",
+            f"Ринок {more_stable} демонструє стабільніший тренд (R² = {max(r2_0, r2_1):.2f}), "
+            f"тоді як {less_stable} має вищу волатильність (R² = {min(r2_0, r2_1):.2f})."
+        ))
+
+    # Bullet 3: Seasonality advice (based on peak/trough months)
+    for ds in datasets:
+        proj = ds.get("project", "").split(".")[0].upper()
+        seas = ds.get("seasonality", {})
+        peaks = seas.get("peak_months", [])
+        troughs = seas.get("trough_months", [])
+        if peaks:
+            bullets.append((
+                f"Сезонність ({proj})",
+                f"Виражений пік попиту у місяцях: {fmt_months(peaks)}. "
+                f"Для максимального охоплення запускати промокампанії за 1 місяць до піку."
+            ))
+            break  # Only one seasonality bullet to save space
+
+    return summary, bullets[:3]
+
+
+def build_signals_from_data(datasets: list) -> list[tuple[str, str]]:
+    """Build Column 2 (Signals & Anomalies) entirely from analysis data."""
+    signals = []
+
+    for ds in datasets:
+        proj = ds.get("project", "").split(".")[0].upper()
+        art = ds.get("article_display", "—")
+        avg = ds.get("avg_views", 1)
+
+        # Anomalies
+        for a in ds.get("anomalies", []):
+            ts = a.get("timestamp", "")
+            views = a.get("views", 0)
+            z = a.get("z_score", 0)
+            ratio = views / max(avg, 1)
+            signals.append((
+                f"Сплеск у {ts} (Z = {z:.2f})",
+                f"{proj}: {fmt_n(views)} переглядів (у {ratio:.1f}x вище середнього {fmt_n(int(avg))}/міс)."
+            ))
+
+        # Seasonality
+        seas = ds.get("seasonality", {})
+        peaks = seas.get("peak_months", [])
+        troughs = seas.get("trough_months", [])
+        if peaks:
+            signals.append((
+                f"Сезонні піки ({proj})",
+                f"Виражений підйом інтересу у місяцях: {fmt_months(peaks)}."
+            ))
+        if troughs:
+            signals.append((
+                f"Сезонне дно ({proj})",
+                f"Мінімальна активність у місяцях: {fmt_months(troughs)}."
+            ))
+
+        # YoY changes
+        yoy = ds.get("yoy_changes", [])
+        if yoy:
+            parts = []
+            for y in yoy[:2]:
+                parts.append(f"{y.get('period')}: {y.get('change_percent', 0):+.1f}%")
+            signals.append((
+                f"Річна динаміка ({proj})",
+                f"{'; '.join(parts)}."
+            ))
+
+    return signals[:5]
+
+
+def build_limitations_from_data(limitations: list) -> list[tuple[str, str]]:
+    """Build Column 3 (Limitations) from analysis JSON limitations array."""
+    result = []
+    for lim in limitations[:4]:
+        # Split at first period or use the whole string
+        if ". " in lim:
+            parts = lim.split(". ", 1)
+            # Try to make a short title from first sentence
+            title = parts[0]
+            if len(title) > 40:
+                title = title[:38] + "…"
+            desc = lim
+        elif "," in lim:
+            title = lim.split(",", 1)[0]
+            if len(title) > 40:
+                title = title[:38] + "…"
+            desc = lim
+        else:
+            title = lim[:40] + "…" if len(lim) > 40 else lim
+            desc = lim
+
+        result.append((title, desc))
+
+    # Ensure we have at least a few items
+    if len(result) < 2:
+        result.append(("Методологія", "Аналіз базується на даних переглядів статей Вікіпедії (agent=user). Перегляди відображають інформаційний інтерес, а не готовність платити."))
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════
+
 def main():
-    parser = argparse.ArgumentParser(description="Generate Executive Swiss-Grid Landscape A4 Wikipedia Trends Report")
+    parser = argparse.ArgumentParser(description="Generate Executive Landscape A4 Wikipedia Trends Report")
     parser.add_argument("--analysis", required=True, help="Path to JSON file from analyze_trends.py")
     parser.add_argument("--chart", required=True, help="Path to chart PNG file from generate_chart.py")
     parser.add_argument("--title", default="Аналіз ринкового інтересу: Wikipedia Trends", help="Report title")
     parser.add_argument("--output", default="report.pdf", help="Output PDF file path")
+    parser.add_argument("--insights", default=None, help="Optional JSON with LLM-generated product insights for Column 1")
     args = parser.parse_args()
 
     # Load analysis data
@@ -143,298 +354,213 @@ def main():
 
     datasets = data.get("datasets", [])
     comparison = data.get("comparison", {}) or {}
-    limitations = data.get("limitations", [])
+    limitations_raw = data.get("limitations", [])
 
+    # Load optional LLM insights
+    llm_insights = None
+    if args.insights and os.path.exists(args.insights):
+        try:
+            with open(args.insights, 'r', encoding='utf-8') as f:
+                llm_insights = json.load(f)
+        except Exception:
+            pass
+
+    # Build dynamic text for all three columns
+    if llm_insights:
+        decision_summary = llm_insights.get("decision_summary", "")
+        decision_bullets = [(b.get("title", ""), b.get("text", "")) for b in llm_insights.get("bullets", [])]
+        if not decision_summary:
+            decision_summary, decision_bullets = build_decision_from_data(datasets, comparison)
+    else:
+        decision_summary, decision_bullets = build_decision_from_data(datasets, comparison)
+
+    signals = build_signals_from_data(datasets)
+    limits = build_limitations_from_data(limitations_raw)
+
+    # ── Build PDF ──
     pdf = ExecutiveGridPDF()
     ff = setup_font(pdf)
     pdf.ff = ff
     pdf.add_page()
 
-    # Canvas background (297 x 210 mm)
+    # Canvas background
     pdf.set_fill_color(*PAGE_BG)
     pdf.rect(0, 0, 297, 210, style="F")
 
-    # ═══════════════════════════════════════════════════════════
-    # Grid Geometry Parameters (Exact 1:2 Column System)
-    # Page width: 297 mm, Margins: 12 mm left & right
-    # Usable width: 273 mm
-    # 3 equal columns: width = 88 mm each, gap = 4.5 mm
-    # Col 1: x = 12.0 mm, w = 88.0 mm
-    # Col 2: x = 104.5 mm, w = 88.0 mm
-    # Col 3: x = 197.0 mm, w = 88.0 mm
-    # Chart width (Col 2 + gap + Col 3) = 88 + 4.5 + 88 = 180.5 mm
-    # ═══════════════════════════════════════════════════════════
+    # Grid geometry
     ML      = 12.0
     COL_W   = 88.0
     GAP     = 4.5
-    CHART_W = COL_W * 2 + GAP   # 180.5 mm
-    CHART_X = ML + COL_W + GAP  # 104.5 mm
+    CHART_W = COL_W * 2 + GAP
+    CHART_X = ML + COL_W + GAP
 
-    # ═══════════════════════════════════════════════════════════
-    # 1. TOP HEADER (y: 10 to 23, h: 13 mm)
-    # Clean, uncluttered, no redundant technical tags
-    # ═══════════════════════════════════════════════════════════
     now_str = datetime.now().strftime("%d.%m.%Y • %H:%M")
 
-    # Title
+    # ═══ 1. HEADER ═══
     pdf.set_xy(ML, 10.0)
     pdf.set_font(ff, "B", 15.5)
     pdf.set_text_color(*TEXT_900)
-    clean_title = args.title if not args.title.startswith("Звіт") else args.title
-    pdf.cell(175, 7.5, clean_title, align="L")
+    pdf.cell(175, 7.5, args.title, align="L")
 
-    # Right metadata (Date & Sampling window only)
     pdf.set_font(ff, "", 8.0)
     pdf.set_text_color(*TEXT_500)
     pdf.set_xy(197.0, 10.0)
     pdf.cell(88.0, 4.0, f"Дата створення: {now_str}", align="R")
     pdf.set_xy(197.0, 14.5)
-    pdf.cell(88.0, 4.0, "Вибірка аналізу: 24 місяці (помісячно)", align="R")
+    n_months = len(datasets[0].get("yoy_changes", [])) * 12 + 12 if datasets else 24
+    # Try to determine actual sample size from data
+    pdf.cell(88.0, 4.0, f"Вибірка аналізу: {n_months} місяців (помісячно)", align="R")
 
-    # Header divider line
     pdf.set_draw_color(*CARD_BORDER)
     pdf.set_line_width(0.3)
     pdf.line(ML, 23.5, ML + COL_W * 3 + GAP * 2, 23.5)
 
-    # ═══════════════════════════════════════════════════════════
-    # 2. HERO ROW (y: 27.5 to 123.5, h: 96 mm)
-    # Left (1/3, w: 88 mm): 2 KPI Cards
-    # Right (2/3, w: 180.5 mm): Main Time Series Chart
-    # ═══════════════════════════════════════════════════════════
+    # ═══ 2. HERO ROW (y: 27.5, h: 96) ═══
     hero_y  = 27.5
     hero_h  = 96.0
     card_gap = 4.5
-    kpi_card_h = (hero_h - card_gap) / 2.0  # 45.75 mm each
+    num_cards = min(len(datasets), 4)
+    kpi_card_h = (hero_h - card_gap * max(num_cards - 1, 1)) / max(num_cards, 1)
 
-    # ── LEFT: 2 KPI CARDS (Matches Column 1 below) ──
-    for i in range(2):
+    # ── KPI Cards (LEFT, 1/3 width) ──
+    for i in range(num_cards):
         cy = hero_y + i * (kpi_card_h + card_gap)
         pdf.draw_card(ML, cy, COL_W, kpi_card_h, r=3.5)
 
-        if i < len(datasets):
-            ds = datasets[i]
-            article = ds.get("article_display", "—")
-            project = ds.get("project", "")
-            lang = project.split(".")[0].upper()
+        ds = datasets[i]
+        article = ds.get("article_display", "—")
+        project = ds.get("project", "")
+        lang = project.split(".")[0].upper()
+        accent_c = DS_ACCENTS[i % len(DS_ACCENTS)]
 
-            accent_c = DS_ACCENTS[i % len(DS_ACCENTS)]
-            # Vertical accent strip on left edge
-            pdf.set_fill_color(*accent_c)
-            pdf.rect(ML, cy, 3.0, kpi_card_h, style="F", round_corners=True, corner_radius=1.5)
+        # Accent strip
+        pdf.set_fill_color(*accent_c)
+        pdf.rect(ML, cy, 3.0, kpi_card_h, style="F", round_corners=True, corner_radius=1.5)
 
-            # Language badge
-            lpw = pdf.draw_pill(
-                ML + 6.0, cy + 4.5,
-                text=lang,
-                bg=(238, 242, 255) if i == 0 else (255, 241, 242),
-                tc=accent_c,
-                font_size=6.8, bold=True, h=4.2
-            )
+        # Language badge
+        badge_bg = (238, 242, 255) if i == 0 else (255, 241, 242) if i == 1 else (240, 253, 250)
+        lpw = pdf.draw_pill(ML + 6.0, cy + 4.5, text=lang, bg=badge_bg, tc=accent_c, font_size=6.8, bold=True, h=4.2)
 
-            # Article Title
-            pdf.set_xy(ML + 6.0 + lpw + 2.5, cy + 4.2)
-            pdf.set_font(ff, "B", 9.5)
-            pdf.set_text_color(*TEXT_900)
-            max_c = int((COL_W - lpw - 15) / 2.2)
-            art_disp = article if len(article) <= max_c else article[:max_c-1] + "…"
-            pdf.cell(COL_W - lpw - 15, 4.5, art_disp)
+        # Article title
+        pdf.set_xy(ML + 6.0 + lpw + 2.5, cy + 4.2)
+        pdf.set_font(ff, "B", 9.5)
+        pdf.set_text_color(*TEXT_900)
+        max_c = int((COL_W - lpw - 15) / 2.2)
+        art_disp = article if len(article) <= max_c else article[:max_c-1] + "…"
+        pdf.cell(COL_W - lpw - 15, 4.5, art_disp)
 
-            # Project domain subtext
-            pdf.set_xy(ML + 6.0, cy + 9.5)
-            pdf.set_font(ff, "", 7.2)
-            pdf.set_text_color(*TEXT_400)
-            pdf.cell(COL_W - 12, 3.5, project)
+        # Project domain
+        pdf.set_xy(ML + 6.0, cy + 9.5)
+        pdf.set_font(ff, "", 7.2)
+        pdf.set_text_color(*TEXT_400)
+        pdf.cell(COL_W - 12, 3.5, project)
 
-            # Total Views (Big bold number)
-            total = ds.get("total_views", 0)
-            avg = ds.get("avg_views", 0)
-            pdf.set_xy(ML + 6.0, cy + 14.5)
-            pdf.set_font(ff, "B", 19.0)
-            pdf.set_text_color(*TEXT_900)
-            tot_str = fmt_n(total)
-            tw = pdf.get_string_width(tot_str)
-            pdf.cell(tw + 1.0, 8.5, tot_str)
+        # Total views (big number)
+        total = ds.get("total_views", 0)
+        avg = ds.get("avg_views", 0)
+        pdf.set_xy(ML + 6.0, cy + 14.5)
+        pdf.set_font(ff, "B", 19.0)
+        pdf.set_text_color(*TEXT_900)
+        tot_str = fmt_n(total)
+        tw = pdf.get_string_width(tot_str)
+        pdf.cell(tw + 1.0, 8.5, tot_str)
 
-            # Monthly baseline average next to main number
-            pdf.set_xy(ML + 6.0 + tw + 3.0, cy + 18.0)
-            pdf.set_font(ff, "", 7.6)
-            pdf.set_text_color(*TEXT_500)
-            pdf.cell(38, 4.0, f"ср. {fmt_n(int(avg))} / міс")
+        # Monthly avg baseline
+        pdf.set_xy(ML + 6.0 + tw + 3.0, cy + 18.0)
+        pdf.set_font(ff, "", 7.6)
+        pdf.set_text_color(*TEXT_500)
+        pdf.cell(38, 4.0, f"ср. {fmt_n(int(avg))} / міс")
 
-            # Trend Badge
-            trend = ds.get("trend", {})
-            pct = trend.get("change_percent_total", 0.0)
-            is_up = (pct > 0)
-            arrow = "▲" if is_up else "▼"
-            badge_lbl = f"{arrow} {pct:+.1f}%"
-            badge_bg = GREEN_BG if is_up else RED_BG
-            badge_tc = GREEN_TEXT if is_up else RED_TEXT
+        # Trend badge
+        trend = ds.get("trend", {})
+        pct = trend.get("change_percent_total", 0.0)
+        arrow = "▲" if pct > 0 else "▼"
+        badge_lbl = f"{arrow} {pct:+.1f}%"
+        badge_bg = GREEN_BG if pct > 0 else RED_BG
+        badge_tc = GREEN_TEXT if pct > 0 else RED_TEXT
+        pdf.draw_pill(ML + 6.0, cy + 25.5, badge_lbl, bg=badge_bg, tc=badge_tc, font_size=7.6, h=5.2)
 
-            tbw = pdf.draw_pill(ML + 6.0, cy + 25.5, badge_lbl, bg=badge_bg, tc=badge_tc, font_size=7.6, h=5.2)
+        # R² + interpretation
+        r2 = trend.get("r_squared", 0.0)
+        if r2 >= 0.7:
+            interp = "Стабільний чіткий тренд"
+        elif r2 >= 0.4:
+            interp = "Помітний тренд з коливаннями"
+        elif r2 >= 0.15:
+            interp = "Висока сезонна волатильність"
+        else:
+            interp = "Тренд нестабільний (шум)"
+        pdf.set_xy(ML + 6.0, cy + 34.5)
+        pdf.set_font(ff, "", 6.8)
+        pdf.set_text_color(*TEXT_500)
+        pdf.cell(COL_W - 12, 4.0, f"R² = {r2:.2f}  •  {interp}")
 
-            # Business characterization of the trend with R²
-            r2 = trend.get("r_squared", 0.0)
-            if i == 0:
-                char_text = f"R² = {r2:.2f}  •  Висока сезонна волатильність"
-            else:
-                char_text = f"R² = {r2:.2f}  •  Помірні коливання (стабільніший)"
-
-            pdf.set_xy(ML + 6.0, cy + 34.5)
-            pdf.set_font(ff, "", 6.8)
-            pdf.set_text_color(*TEXT_500)
-            pdf.cell(COL_W - 12, 4.0, char_text)
-
-    # ── RIGHT: MAIN CHART CARD (Matches Column 2 + Column 3 below) ──
+    # ── Chart Card (RIGHT, 2/3 width) ──
     pdf.draw_card(CHART_X, hero_y, CHART_W, hero_h, r=3.5)
-
-    # Header inside chart card (including unit)
     pdf.set_xy(CHART_X + 6.0, hero_y + 3.8)
     pdf.set_font(ff, "B", 7.8)
     pdf.set_text_color(*TEXT_500)
-    pdf.cell(CHART_W - 12, 4.0, "ДИНАМІКА ПОПИТУ ТА ДОВГОСТРОКОВИЙ ТРЕНД (ПЕРЕГЛЯДИ / МІСЯЦЬ, 24 МІСЯЦІ)")
+    pdf.cell(CHART_W - 12, 4.0, "ДИНАМІКА ПОПИТУ ТА ДОВГОСТРОКОВИЙ ТРЕНД (ПЕРЕГЛЯДИ / МІСЯЦЬ)")
 
-    # Embed chart image
     if os.path.exists(args.chart):
         try:
             pdf.image(args.chart, x=CHART_X + 2.0, y=hero_y + 8.5, w=CHART_W - 4.0, h=hero_h - 10.5)
         except Exception as e:
             sys.stderr.write(f"Chart render warning: {e}\n")
 
-    # ═══════════════════════════════════════════════════════════
-    # 3. BOTTOM ROW: THREE EQUAL COLUMNS (y: 127.5 to 200.0, h: 72.5 mm)
-    # Col 1: Strategic Product Decision Memo (Grounded in data)
-    # Col 2: Market Signals & Anomalies (Seasonality, YoY)
-    # Col 3: Boundaries of Confidence & Limitations (Methodology)
-    # ═══════════════════════════════════════════════════════════
+    # ═══ 3. BOTTOM ROW: THREE COLUMNS (y: 127.5, h: 72.5) ═══
     bot_y = 127.5
     bot_h = 72.5
-
     col1_x = ML
     col2_x = ML + COL_W + GAP
     col3_x = col2_x + COL_W + GAP
 
-    # ── COLUMN 1: 1. РІШЕННЯ ДЛЯ ПРОДУКТУ ──
-    pdf.draw_card(col1_x, bot_y, COL_W, bot_h, r=3.5)
+    # Helper: render a column with title, optional summary, and bullet list
+    def render_column(cx, accent_color, num, title, summary, bullets, max_bullets=4):
+        pdf.draw_card(cx, bot_y, COL_W, bot_h, r=3.5)
+        pdf.set_fill_color(*accent_color)
+        pdf.rect(cx, bot_y, COL_W, 2.5, style="F", round_corners=True, corner_radius=1.5)
+        pdf.draw_number_badge(cx + 8.0, bot_y + 8.5, radius=3.0, text=str(num), bg=accent_color)
+        pdf.set_xy(cx + 14.0, bot_y + 6.5)
+        pdf.set_font(ff, "B", 9.2)
+        tc = accent_color if num == 1 else TEXT_900
+        pdf.set_text_color(*tc)
+        pdf.cell(COL_W - 18, 4.5, title)
 
-    # Top accent bar (Indigo)
-    pdf.set_fill_color(*INDIGO_PRIMARY)
-    pdf.rect(col1_x, bot_y, COL_W, 2.5, style="F", round_corners=True, corner_radius=1.5)
+        cur_y = bot_y + 13.5
 
-    # Number badge & Title
-    pdf.draw_number_badge(col1_x + 8.0, bot_y + 8.5, radius=3.0, text="1", bg=INDIGO_PRIMARY)
-    pdf.set_xy(col1_x + 14.0, bot_y + 6.5)
-    pdf.set_font(ff, "B", 9.2)
-    pdf.set_text_color(*INDIGO_PRIMARY)
-    pdf.cell(COL_W - 18, 4.5, "РІШЕННЯ ДЛЯ ПРОДУКТУ")
+        if summary:
+            pdf.set_xy(cx + 6, cur_y)
+            pdf.set_font(ff, "", 7.3)
+            pdf.set_text_color(*TEXT_700)
+            pdf.multi_cell(COL_W - 12, 3.3, summary, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            cur_y = pdf.get_y() + 1.5
 
-    # Concrete business decision for the founder (concise, no overflow)
-    decision_p1 = "Запуск курсу з астрономії суто під ринок України є ризикованим: попит падає (-67.2%), а 27% річного трафіку зосереджено в одному вересні (шкільна програма 11 класу)."
+        for b_title, b_desc in bullets[:max_bullets]:
+            if cur_y > bot_y + bot_h - 8:
+                break
+            pdf.set_fill_color(*accent_color)
+            pdf.ellipse(cx + 6, cur_y + 1.2, 1.6, 1.6, style="F")
+            pdf.set_xy(cx + 9.5, cur_y)
+            pdf.set_font(ff, "B", 7.2)
+            pdf.set_text_color(*TEXT_900)
+            pdf.cell(COL_W - 15, 3.2, b_title)
+            pdf.set_xy(cx + 9.5, cur_y + 3.0)
+            pdf.set_font(ff, "", 6.9)
+            pdf.set_text_color(*TEXT_700)
+            pdf.multi_cell(COL_W - 15, 2.9, b_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            cur_y = pdf.get_y() + 1.0
 
-    pdf.set_xy(col1_x + 6, bot_y + 13.5)
-    pdf.set_font(ff, "", 7.5)
-    pdf.set_text_color(*TEXT_700)
-    pdf.multi_cell(COL_W - 12, 3.5, decision_p1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    # Column 1: Product Decision
+    render_column(col1_x, INDIGO_PRIMARY, 1, "РІШЕННЯ ДЛЯ ПРОДУКТУ", decision_summary, decision_bullets, max_bullets=3)
 
-    # Actionable bullets for product expansion
-    p1_bullets = [
-        ("Пріоритет ринку", "Для масштабування обирати Global EN: попит у 12.4x більший (39.4k проти 3.2k/міс) і менш волатильний."),
-        ("Сезонний спецпроєкт", "В Україні продукт варто позиціонувати як короткий інтенсив наприкінці серпня під осінній підйом."),
-        ("Позиціонування", "Для залучення дорослої платоспроможної аудиторії акцентувати практичні навички, а не шкільну теорію.")
-    ]
+    # Column 2: Signals & Anomalies
+    render_column(col2_x, TEAL_PRIMARY, 2, "СИГНАЛИ ТА АНОМАЛІЇ", None, signals, max_bullets=5)
 
-    by1 = pdf.get_y() + 1.8
-    for b_title, b_desc in p1_bullets:
-        pdf.set_fill_color(*INDIGO_PRIMARY)
-        pdf.ellipse(col1_x + 6, by1 + 1.2, 1.6, 1.6, style="F")
-        pdf.set_xy(col1_x + 9.5, by1)
-        pdf.set_font(ff, "B", 7.4)
-        pdf.set_text_color(*TEXT_900)
-        pdf.cell(COL_W - 15, 3.3, b_title + ":")
-        pdf.set_xy(col1_x + 9.5, by1 + 3.2)
-        pdf.set_font(ff, "", 7.0)
-        pdf.set_text_color(*TEXT_700)
-        pdf.multi_cell(COL_W - 15, 3.0, b_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        by1 = pdf.get_y() + 1.2
+    # Column 3: Limitations
+    render_column(col3_x, SLATE_PRIMARY, 3, "МЕЖІ ДОВІРИ ТА ОБМЕЖЕННЯ", None, limits, max_bullets=4)
 
-    # ── COLUMN 2: 2. СИГНАЛИ ТА АНОМАЛІЇ ──
-    pdf.draw_card(col2_x, bot_y, COL_W, bot_h, r=3.5)
-
-    # Top accent bar (Teal)
-    pdf.set_fill_color(*TEAL_PRIMARY)
-    pdf.rect(col2_x, bot_y, COL_W, 2.5, style="F", round_corners=True, corner_radius=1.5)
-
-    pdf.draw_number_badge(col2_x + 8.0, bot_y + 8.5, radius=3.0, text="2", bg=TEAL_PRIMARY)
-    pdf.set_xy(col2_x + 14.0, bot_y + 6.5)
-    pdf.set_font(ff, "B", 9.2)
-    pdf.set_text_color(*TEXT_900)
-    pdf.cell(COL_W - 18, 4.5, "СИГНАЛИ ТА АНОМАЛІЇ")
-
-    signals = [
-        ("Вересневий сплеск (Z = 3.17)",
-         "У вересні 2022 та 2023 року попит підскакує до 10.5 тис. переглядів (у 3.3 рази вище норми) на старті шкільного курсу 11 класу."),
-        ("Сезонне літнє дно (-80% активності)",
-         "У червні–серпні попит в Україні падає до мінімальних 637 переглядів — період мінімальної органічної активності."),
-        ("Річна динаміка попиту (YoY)",
-         "UK: різкий підйом у 2023 (+92.6%) та спад у 2024 (-60.8%); EN: зростання на +183.1% та плавна корекція на -34.1%."),
-        ("Стабільність глобального попиту",
-         "Англомовний розділ (en) демонструє стабільний річний трафік без різких шкільних розривів (спад лише -11.8%).")
-    ]
-
-    by2 = bot_y + 13.5
-    for s_title, s_desc in signals:
-        pdf.set_fill_color(*TEAL_PRIMARY)
-        pdf.ellipse(col2_x + 6, by2 + 1.2, 1.6, 1.6, style="F")
-        pdf.set_xy(col2_x + 9.5, by2)
-        pdf.set_font(ff, "B", 7.4)
-        pdf.set_text_color(*TEXT_900)
-        pdf.cell(COL_W - 15, 3.3, s_title)
-        pdf.set_xy(col2_x + 9.5, by2 + 3.2)
-        pdf.set_font(ff, "", 7.0)
-        pdf.set_text_color(*TEXT_700)
-        pdf.multi_cell(COL_W - 15, 3.0, s_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        by2 = pdf.get_y() + 1.2
-
-    # ── COLUMN 3: 3. МЕЖІ ДОВІРИ ТА ПРИПУЩЕННЯ ──
-    pdf.draw_card(col3_x, bot_y, COL_W, bot_h, r=3.5)
-
-    # Top accent bar (Slate)
-    pdf.set_fill_color(*SLATE_PRIMARY)
-    pdf.rect(col3_x, bot_y, COL_W, 2.5, style="F", round_corners=True, corner_radius=1.5)
-
-    pdf.draw_number_badge(col3_x + 8.0, bot_y + 8.5, radius=3.0, text="3", bg=SLATE_PRIMARY)
-    pdf.set_xy(col3_x + 14.0, bot_y + 6.5)
-    pdf.set_font(ff, "B", 9.2)
-    pdf.set_text_color(*TEXT_900)
-    pdf.cell(COL_W - 18, 4.5, "МЕЖІ ДОВІРИ ТА ОБМЕЖЕННЯ")
-
-    limits = [
-        ("Інтерес ≠ готовність платити",
-         "Перегляд статті Вікіпедії відображає довідковий інтерес до теми, а не сформовану готовність купувати платний курс."),
-        ("Низька база переглядів UK",
-         "Влітку денний трафік UK падає до ~20 переглядів/день, що підвищує статистичну волатильність і похибку вибірки."),
-        ("Фільтрація ботів (agent=user)",
-         "Використано дані реальних користувачів, проте частина автоматизованих AI-скраперів може залишатися у вибірці."),
-        ("Вплив зовнішніх медіа-подій",
-         "Астрономічні явища (затемнення, запуски NASA) створюють короткочасні неорганічні сплески інтересу.")
-    ]
-
-    by3 = bot_y + 13.5
-    for l_title, l_desc in limits:
-        pdf.set_fill_color(*SLATE_PRIMARY)
-        pdf.ellipse(col3_x + 6, by3 + 1.2, 1.6, 1.6, style="F")
-        pdf.set_xy(col3_x + 9.5, by3)
-        pdf.set_font(ff, "B", 7.4)
-        pdf.set_text_color(*TEXT_900)
-        pdf.cell(COL_W - 15, 3.3, l_title)
-        pdf.set_xy(col3_x + 9.5, by3 + 3.2)
-        pdf.set_font(ff, "", 7.0)
-        pdf.set_text_color(*TEXT_700)
-        pdf.multi_cell(COL_W - 15, 3.0, l_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        by3 = pdf.get_y() + 1.2
-
-    # ═══════════════════════════════════════════════════════════
-    # Save Report
-    # ═══════════════════════════════════════════════════════════
+    # ═══ Save ═══
     try:
         os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
         pdf.output(args.output)
