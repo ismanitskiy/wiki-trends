@@ -54,7 +54,7 @@ def get_wikidata_sitelinks(lang, title):
             wikibase_item = pdata.get("pageprops", {}).get("wikibase_item")
             if wikibase_item:
                 break
-                
+
         if not wikibase_item:
             return {}
 
@@ -69,7 +69,7 @@ def get_wikidata_sitelinks(lang, title):
         wd_res.raise_for_status()
         entities = wd_res.json().get("entities", {})
         sitelinks = entities.get(wikibase_item, {}).get("sitelinks", {})
-        
+
         # Mapping from language code (e.g. 'pl' from 'plwiki') to title
         links = {}
         for site_key, site_val in sitelinks.items():
@@ -111,31 +111,31 @@ def main():
     parser.add_argument("--source-lang", default="en", help="Source language code (default: en)")
     parser.add_argument("--target-langs", required=True, help="Comma-separated target language codes (e.g., uk,pl,cs)")
     parser.add_argument("--output", help="Output file path (default: stdout)")
-    
+
     args = parser.parse_args()
-    
+
     target_langs = [lang.strip().lower() for lang in args.target_langs.split(",") if lang.strip()]
-    
+
     # 1. Search in source language
     source_title = search_article(args.source_lang, args.query)
     if not source_title:
         # Try direct capitalized query if search fails
         source_title = args.query.strip().capitalize()
-        
+
     source_title_encoded = source_title.replace(" ", "_")
-    
+
     # 2. Get langlinks from Wikipedia Action API
     langlinks = get_langlinks(args.source_lang, source_title)
-    
+
     # 3. Augment with Wikidata sitelinks for comprehensive resolution
     wd_sitelinks = get_wikidata_sitelinks(args.source_lang, source_title)
     for l_code, l_title in wd_sitelinks.items():
         if l_code not in langlinks:
             langlinks[l_code] = l_title
-            
+
     resolved = {}
     not_found = []
-    
+
     for t_lang in target_langs:
         if t_lang == args.source_lang:
             resolved[t_lang] = {
@@ -144,7 +144,7 @@ def main():
                 "project": f"{t_lang}.wikipedia.org"
             }
             continue
-            
+
         if t_lang in langlinks:
             target_title = langlinks[t_lang]
             resolved[t_lang] = {
@@ -165,7 +165,7 @@ def main():
                 }
             else:
                 not_found.append(t_lang)
-                
+
     result = {
         "query": args.query,
         "source": {
@@ -177,7 +177,7 @@ def main():
         "resolved": resolved,
         "not_found": not_found
     }
-    
+
     output_json = json.dumps(result, indent=2, ensure_ascii=False)
     if args.output:
         try:

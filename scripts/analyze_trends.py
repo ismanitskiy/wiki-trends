@@ -24,30 +24,30 @@ def load_data(filepath):
 def calculate_linear_trend(views):
     if len(views) < 2:
         return {"direction": "stable", "slope_per_month": 0.0, "change_percent_total": 0.0, "r_squared": 0.0, "confidence": "low", "confidence_explanation": "Not enough data points for trend analysis."}
-    
+
     x = np.arange(len(views))
     y = np.array(views)
-    
+
     slope, intercept = np.polyfit(x, y, 1)
-    
+
     # Calculate R-squared
     y_pred = slope * x + intercept
     ss_res = np.sum((y - y_pred) ** 2)
     ss_tot = np.sum((y - np.mean(y)) ** 2)
     r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-    
+
     start_val = y_pred[0]
     end_val = y_pred[-1]
     change_percent = ((end_val - start_val) / start_val * 100) if start_val > 0 else 0
-    
+
     direction = "stable"
     if slope > 0 and change_percent > 5:
         direction = "growing"
     elif slope < 0 and change_percent < -5:
         direction = "declining"
-        
+
     n_points = len(views)
-    
+
     if r_squared > 0.7 and n_points > 24:
         confidence = "висока"
         expl = f"Високий R² ({r_squared:.2f}) на {n_points} точках вказує на стійкий та надійний тренд."
@@ -57,7 +57,7 @@ def calculate_linear_trend(views):
     else:
         confidence = "низька"
         expl = f"Низький R² ({r_squared:.2f}) або недостатньо даних ({n_points}) свідчить про слабку надійність тренду."
-        
+
     return {
         "direction": direction,
         "slope_per_month": round(slope, 2),
@@ -75,21 +75,21 @@ def calculate_yoy(data_list):
             yearly_totals[year] = yearly_totals.get(year, 0) + item['views']
         except:
             pass
-            
+
     years = sorted(list(yearly_totals.keys()))
     yoy_changes = []
-    
+
     for i in range(1, len(years)):
         prev_yr, curr_yr = years[i-1], years[i]
         prev_val, curr_val = yearly_totals[prev_yr], yearly_totals[curr_yr]
-        
+
         if prev_val > 0:
             change = (curr_val - prev_val) / prev_val * 100
             yoy_changes.append({
                 "period": f"{curr_yr} vs {prev_yr}",
                 "change_percent": round(change, 2)
             })
-            
+
     return yoy_changes
 
 def detect_seasonality(data_list):
@@ -104,35 +104,35 @@ def detect_seasonality(data_list):
                 months[month].append(item['views'])
         except:
             pass
-            
+
     if not months or len(months) < 12:
         return {"detected": False}
-        
+
     avg_by_month = {m: np.mean(v) for m, v in months.items() if len(v) >= 1}
     if not avg_by_month:
          return {"detected": False}
-         
+
     overall_mean = np.mean(list(avg_by_month.values()))
-    
+
     if overall_mean == 0:
         return {"detected": False}
-        
+
     peaks = []
     troughs = []
-    
+
     for m, avg in avg_by_month.items():
         if avg > overall_mean * 1.15:
             peaks.append(m)
         elif avg < overall_mean * 0.85:
             troughs.append(m)
-            
+
     detected = len(peaks) > 0 or len(troughs) > 0
-    
+
     if detected:
         expl = "Виявлено суттєві сезонні коливання інтересу між місяцями."
     else:
         expl = "Вираженої сезонності не виявлено."
-        
+
     return {
         "detected": detected,
         "peak_months": peaks,
@@ -144,13 +144,13 @@ def detect_anomalies(data_list):
     views = [d['views'] for d in data_list]
     if len(views) < 3:
         return []
-        
+
     mean = np.mean(views)
     std = np.std(views)
-    
+
     if std == 0:
         return []
-        
+
     anomalies = []
     for item in data_list:
         v = item['views']
@@ -163,28 +163,28 @@ def detect_anomalies(data_list):
                 "z_score": round(z, 2),
                 "type": "сплеск" if z > 0 else "провал"
             })
-            
+
     return anomalies
 
 def analyze_dataset(data):
     if not data or 'data' not in data:
         return None
-        
+
     data_list = data['data']
     views = [item['views'] for item in data_list]
-    
+
     if not views:
         return None
-        
+
     total_views = sum(views)
     avg_views = np.mean(views)
     median_views = np.median(views)
-    
+
     trend = calculate_linear_trend(views)
     yoy = calculate_yoy(data_list)
     anomalies = detect_anomalies(data_list)
     seasonality = detect_seasonality(data_list)
-    
+
     start_date = data_list[0].get('timestamp', '') if data_list else ''
     end_date = data_list[-1].get('timestamp', '') if data_list else ''
 
@@ -207,35 +207,35 @@ def analyze_dataset(data):
 def compare_datasets(results):
     if len(results) < 2:
         return None
-        
+
     fastest_growth_rate = -float('inf')
     fastest_growing = None
-    
+
     largest_avg_views = -1
     largest_audience = None
-    
+
     for res in results:
         # Normalized growth rate
         avg = res['avg_views']
         slope = res['trend']['slope_per_month']
         norm_growth = (slope / avg) if avg > 0 else 0
-        
+
         if norm_growth > fastest_growth_rate:
             fastest_growth_rate = norm_growth
             fastest_growing = {
                 "project": res['project'],
                 "normalized_growth_rate": round(norm_growth, 4)
             }
-            
+
         if avg > largest_avg_views:
             largest_avg_views = avg
             largest_audience = {
                 "project": res['project'],
                 "avg_monthly_views": avg
             }
-            
+
     rec = f"Найшвидше відносне зростання показує {fastest_growing['project']}. Найбільшу загальну аудиторію має {largest_audience['project']}."
-    
+
     return {
         "fastest_growing": fastest_growing,
         "largest_audience": largest_audience,
@@ -246,9 +246,10 @@ def main():
     parser = argparse.ArgumentParser(description="Analyze Wikipedia pageview time-series data.")
     parser.add_argument('--input', type=str, action='append', required=True, help='Path to JSON file(s) from fetch_pageviews.py')
     parser.add_argument('--output', type=str, help='Output file path (default: stdout)')
-    
+    parser.add_argument('--not-found', type=str, default="", help='Comma-separated language codes where article was not found (e.g. pl)')
+
     args = parser.parse_args()
-    
+
     datasets = []
     for filepath in args.input:
         data = load_data(filepath)
@@ -256,13 +257,15 @@ def main():
             result = analyze_dataset(data)
             if result:
                 datasets.append(result)
-                
+
     if not datasets:
         sys.stderr.write("No valid datasets processed.\n")
         sys.exit(1)
-        
+
+    not_found_list = [x.strip().lower() for x in args.not_found.split(",") if x.strip()]
     output = {
         "datasets": datasets,
+        "not_found": not_found_list,
         "limitations": [
             "Перегляди сторінок Вікіпедії відображають інформаційний інтерес, а не пряму готовність платити за продукт.",
             "На перегляди можуть суттєво впливати зовнішні медійні події, створюючи тимчасові неорганічні сплески.",
@@ -270,14 +273,14 @@ def main():
             "Трафік ботів відфільтровано (agent=user), проте частина автоматизованих переглядів може залишатися."
         ]
     }
-    
+
     if len(datasets) > 1:
         comp = compare_datasets(datasets)
         if comp:
             output["comparison"] = comp
-            
+
     output_json = json.dumps(output, indent=2, ensure_ascii=False)
-    
+
     if args.output:
         try:
             # create parent dirs if needed

@@ -137,6 +137,35 @@ def fmt_n(n) -> str:
     return f"{int(n):,}".replace(",", "\u00a0")
 
 
+def fmt_kpi_total(n) -> str:
+    """Format total views in KPI card: 9 655, 3 249 656, 25.1M, 54.2M, 1.5B."""
+    if n is None:
+        return "—"
+    val = float(n)
+    if val >= 1_000_000_000:
+        return f"{val*1e-9:.2f}B".replace(".00B", "B")
+    elif val >= 10_000_000:
+        s = f"{val*1e-6:.1f}".rstrip("0").rstrip(".")
+        return f"{s}M"
+    return f"{int(val):,}".replace(",", "\u00a0")
+
+
+def fmt_kpi_monthly(n) -> str:
+    """Format monthly average views in KPI card: 402 / міс, 30 979 / міс, 1.04M / міс, 2.26M / міс."""
+    if n is None:
+        return "— / міс"
+    val = float(n)
+    if val >= 1_000_000_000:
+        return f"{val*1e-9:.2f}B / міс".replace(".00B", "B")
+    elif val >= 10_000_000:
+        s = f"{val*1e-6:.1f}".rstrip("0").rstrip(".")
+        return f"{s}M / міс"
+    elif val >= 1_000_000:
+        s = f"{val*1e-6:.2f}".rstrip("0").rstrip(".")
+        return f"{s}M / міс"
+    return f"{int(val):,} / міс".replace(",", "\u00a0")
+
+
 def fmt_months(months: list[int]) -> str:
     """Convert list of month numbers to Ukrainian month names."""
     return ", ".join(MONTH_NAMES_UK.get(m, str(m)) for m in months[:4])
@@ -210,7 +239,7 @@ def slugify_ascii(text: str) -> str:
 # Dynamic Text Generators (100% from analysis JSON)
 # ═══════════════════════════════════════════════════════════════
 
-def build_decision_from_data(datasets: list, comparison: dict) -> tuple[str, list[tuple[str, str]]]:
+def build_decision_from_data(datasets: list, comparison: dict, not_found: list | None = None) -> tuple[str, list[tuple[str, str]]]:
     """Build Column 1 (Product Decision) entirely from analysis data."""
     if len(datasets) < 2:
         ds = datasets[0] if datasets else {}
@@ -218,16 +247,31 @@ def build_decision_from_data(datasets: list, comparison: dict) -> tuple[str, lis
         trend = ds.get("trend", {})
         pct = trend.get("change_percent_total", 0)
         direction = "зростає" if pct > 0 else "спадає"
-        summary = (
-            f"Тема «{art}» демонструє тренд, який {direction} ({pct:+.1f}%) "
-            f"за період спостереження. Загальний обсяг переглядів: {fmt_n(ds.get('total_views', 0))}, "
-            f"середній помісячний попит: {fmt_n(int(ds.get('avg_views', 0)))} переглядів/міс."
-        )
-        bullets = []
-        r2 = trend.get("r_squared", 0)
-        if r2 < 0.3:
-            bullets.append(("Стабільність тренду", f"R² = {r2:.2f} — тренд нестабільний, дані мають високу волатильність. Рішення потребує додаткової перевірки."))
-        return smart_wrap_uk(summary), bullets
+        proj = ds.get("project", "").split(".")[0].upper()
+        avg_v = int(ds.get("avg_views", 0))
+
+        if not_found:
+            nf_proj = not_found[0].upper()
+            summary = (
+                f"Тема представлена лише на ринку {proj} ({fmt_n(avg_v)} переглядів/міс, тренд {pct:+.1f}%), "
+                f"тоді як у мовному розділі {nf_proj} стаття відсутня у Вікіпедії (0 переглядів)."
+            )
+            bullets = [
+                (f"Пріоритет ринку ({proj})", f"Ринок {proj} має підтверджений органічний інтерес ({fmt_n(avg_v)}/міс) і є пріоритетним для запуску."),
+                (f"Ринковий вакуум ({nf_proj})", f"У розділі {nf_proj}.wikipedia.org тема не описана — це сигнал про низьку обізнаність або вільну нішу."),
+                ("Бар'єр виходу на ринок", f"Запуск у сегменті {nf_proj} вимагатиме витрат на формування попиту та освіту споживачів.")
+            ]
+        else:
+            summary = (
+                f"Тема «{art}» демонструє тренд, який {direction} ({pct:+.1f}%) "
+                f"за період спостереження. Загальний обсяг переглядів: {fmt_n(ds.get('total_views', 0))}, "
+                f"середній помісячний попит: {fmt_n(avg_v)} переглядів/міс."
+            )
+            bullets = []
+            r2 = trend.get("r_squared", 0)
+            if r2 < 0.3:
+                bullets.append(("Стабільність тренду", f"R² = {r2:.2f} — тренд нестабільний, дані мають високу волатильність. Рішення потребує додаткової перевірки."))
+        return smart_wrap_uk(summary), [(b[0], smart_wrap_uk(b[1])) for b in bullets]
 
     ds0, ds1 = datasets[0], datasets[1]
     avg0, avg1 = ds0.get("avg_views", 1), ds1.get("avg_views", 1)
@@ -376,7 +420,7 @@ def build_limitations_from_data(limitations: list) -> list[tuple[str, str]]:
 # Filename & Title Helpers
 # ═══════════════════════════════════════════════════════════════
 
-def auto_generate_filename(datasets: list) -> str:
+def auto_generate_filename(datasets: list, not_found: list | None = None) -> str:
     """
     Generate an English, descriptive filename for email and Slack:
     e.g. 'wikipedia_trends_astronomy_uk_vs_en_period_2022-09_to_2024-08_date_2026-09-27.pdf'
@@ -393,6 +437,11 @@ def auto_generate_filename(datasets: list) -> str:
         topic_slug = "comparison"
 
     langs = [ds.get("project", "").split(".")[0].lower() for ds in datasets if ds.get("project")]
+    if not_found:
+        for nf in not_found:
+            if nf.lower() not in langs:
+                langs.append(nf.lower())
+
     lang_str = "_vs_".join(langs) if len(langs) > 1 else (langs[0] if langs else "wiki")
 
     start_date = datasets[0].get("start_date", "2022-09") if datasets else "start"
@@ -402,22 +451,30 @@ def auto_generate_filename(datasets: list) -> str:
     return f"wikipedia_trends_{topic_slug}_{lang_str}_period_{start_date}_to_{end_date}_date_{today_str}.pdf"
 
 
-def auto_generate_title(datasets: list) -> str:
-    """Generate title: '«Астрономія» — UK vs EN Wikipedia'."""
-    if not datasets:
+def auto_generate_title(datasets: list, not_found: list | None = None, topic: str | None = None) -> str:
+    """Generate title: 'Астрономія — UK vs EN Wikipedia'."""
+    if not datasets and not not_found:
         return "Wikipedia Trends — Аналіз ринкового інтересу"
     articles = []
     langs = []
-    for ds in datasets[:3]:
+    uk_article = None
+    for ds in datasets[:4]:
         art = ds.get("article_display", "")
         proj = ds.get("project", "").split(".")[0].upper()
+        if proj == "UK" and art:
+            uk_article = art
         if art and art not in articles:
             articles.append(art)
         if proj and proj not in langs:
             langs.append(proj)
-    topic = articles[0] if articles else "Тема"
+    if not_found:
+        for nf in not_found:
+            proj = nf.upper()
+            if proj not in langs:
+                langs.append(proj)
+    chosen_topic = topic or uk_article or (articles[0] if articles else "Тема")
     lang_str = " vs ".join(langs) if len(langs) > 1 else (langs[0] if langs else "Wikipedia")
-    return f"«{topic}» — {lang_str} Wikipedia"
+    return f"{chosen_topic} — {lang_str} Wikipedia"
 
 
 def format_period_uk(start_str: str, end_str: str, n_points: int) -> str:
@@ -445,8 +502,10 @@ def main():
     parser.add_argument("--analysis", required=True, help="Path to JSON file from analyze_trends.py")
     parser.add_argument("--chart", required=True, help="Path to chart PNG file from generate_chart.py")
     parser.add_argument("--title", default=None, help="Report title (auto-generated if omitted)")
+    parser.add_argument("--topic", default=None, help="Canonical Ukrainian topic name for header (e.g. 'Фондовий ринок')")
     parser.add_argument("--output", default=None, help="Output PDF file path (auto-generated if omitted)")
     parser.add_argument("--insights", default=None, help="Optional JSON with LLM-generated product insights for Column 1")
+    parser.add_argument("--not-found", default="", help="Comma-separated language codes where article was not found")
     args = parser.parse_args()
 
     # Load analysis data
@@ -461,14 +520,22 @@ def main():
     comparison = data.get("comparison", {}) or {}
     limitations_raw = data.get("limitations", [])
 
+    # Missing languages
+    not_found = list(data.get("not_found", []))
+    if args.not_found:
+        for nf in args.not_found.split(","):
+            nf_clean = nf.strip().lower()
+            if nf_clean and nf_clean not in not_found:
+                not_found.append(nf_clean)
+
     # Extract dates & data points
     start_date = datasets[0].get("start_date", "2022-09") if datasets else "2022-09"
     end_date = datasets[0].get("end_date", "2024-08") if datasets else "2024-08"
     n_points = datasets[0].get("data_points", 24) if datasets else 24
 
     # Determine Title and Output Filename
-    report_title = args.title if args.title else auto_generate_title(datasets)
-    output_path = args.output if args.output else auto_generate_filename(datasets)
+    report_title = args.title if args.title else auto_generate_title(datasets, not_found, args.topic)
+    output_path = args.output if args.output else auto_generate_filename(datasets, not_found)
 
     # Optional LLM insights
     llm_insights = None
@@ -483,9 +550,9 @@ def main():
         decision_summary = smart_wrap_uk(llm_insights.get("decision_summary", ""))
         decision_bullets = [(b.get("title", ""), smart_wrap_uk(b.get("text", ""))) for b in llm_insights.get("bullets", [])]
         if not decision_summary:
-            decision_summary, decision_bullets = build_decision_from_data(datasets, comparison)
+            decision_summary, decision_bullets = build_decision_from_data(datasets, comparison, not_found)
     else:
-        decision_summary, decision_bullets = build_decision_from_data(datasets, comparison)
+        decision_summary, decision_bullets = build_decision_from_data(datasets, comparison, not_found)
 
     signals = build_signals_from_data(datasets)
     limits = build_limitations_from_data(limitations_raw)
@@ -511,11 +578,88 @@ def main():
     period_str = format_period_uk(start_date, end_date, n_points)
 
     # ═══ 1. HEADER (y: 10.0 – 23.5) ═══
-    pdf.set_xy(ML, 10.0)
-    pdf.set_font(ff, "B", 15.0)
-    pdf.set_text_color(*TEXT_900)
-    pdf.cell(175, 7.5, report_title, align="L")
+    hy = 10.0
+    cur_x = ML
 
+    # Extract clean topic and language list
+    clean_title = (report_title or "").replace("«", "").replace("»", "").replace('"', '').strip()
+    topic = args.topic
+    if not topic:
+        if "—" in clean_title:
+            topic = clean_title.split("—")[0].strip()
+        elif " - " in clean_title:
+            topic = clean_title.split(" - ")[0].strip()
+        else:
+            for ds in datasets:
+                if ds.get("project", "").startswith("uk"):
+                    topic = ds.get("article_display", "")
+                    break
+            if not topic:
+                topic = datasets[0].get("article_display", "Тема") if datasets else "Тема"
+
+    langs_list = []
+    for ds in datasets:
+        proj = ds.get("project", "").split(".")[0].upper()
+        if proj and proj not in langs_list:
+            langs_list.append(proj)
+    if not_found:
+        for nf in not_found:
+            proj = nf.upper()
+            if proj not in langs_list:
+                langs_list.append(proj)
+
+    # 1. Topic Block with soft, non-distracting pastel background
+    pdf.set_font(ff, "B", 13.5)
+    tw = pdf.get_string_width(topic)
+    if tw > 85.0:
+        pdf.set_font(ff, "B", 11.5)
+        tw = pdf.get_string_width(topic)
+
+    bw = tw + 7.0
+    bh = 8.0
+    # Soft translucent/pastel indigo background
+    pdf.set_fill_color(238, 242, 255)
+    pdf.rect(cur_x, hy, bw, bh, style="F", round_corners=True, corner_radius=2.5)
+
+    pdf.set_xy(cur_x + 3.5, hy + 0.8)
+    pdf.set_text_color(67, 56, 202)  # Indigo 700 / deep indigo
+    pdf.cell(tw, 6.4, topic)
+    cur_x += bw + 3.5
+
+    # 2. Separator Dash
+    pdf.set_xy(cur_x, hy + 0.8)
+    pdf.set_font(ff, "", 12.0)
+    pdf.set_text_color(*TEXT_400)
+    pdf.cell(5.0, 6.4, "—")
+    cur_x += 6.5
+
+    # 3. Language Pills in KPI colors
+    for idx, lang_code in enumerate(langs_list):
+        if idx > 0:
+            pdf.set_xy(cur_x, hy + 0.8)
+            pdf.set_font(ff, "", 10.0)
+            pdf.set_text_color(*TEXT_400)
+            pdf.cell(6.0, 6.4, "vs")
+            cur_x += 7.0
+
+        is_nf = lang_code.lower() in [nf.lower() for nf in not_found]
+        if is_nf:
+            p_bg = (241, 245, 249)
+            p_tc = (100, 116, 139)
+        else:
+            p_tc = DS_ACCENTS[idx % len(DS_ACCENTS)]
+            p_bg = (238, 242, 255) if idx == 0 else (255, 241, 242) if idx == 1 else (240, 253, 250)
+
+        pw = pdf.draw_pill(cur_x, hy + 0.8, text=lang_code, bg=p_bg, tc=p_tc, font_size=8.5, bold=True, h=6.4)
+        cur_x += pw + 2.5
+
+    # 4. Wikipedia suffix
+    pdf.set_xy(cur_x + 1.0, hy + 0.8)
+    pdf.set_font(ff, "B", 12.0)
+    pdf.set_text_color(*TEXT_900)
+    pdf.cell(30.0, 6.4, "Wikipedia")
+
+    # Date and period on the right
     pdf.set_font(ff, "", 8.0)
     pdf.set_text_color(*TEXT_500)
     pdf.set_xy(197.0, 9.5)
@@ -531,7 +675,7 @@ def main():
     hero_y  = 27.5
     hero_h  = 96.0
     card_gap = 4.5
-    num_cards = min(len(datasets), 4)
+    num_cards = min(len(datasets) + len(not_found), 4)
     kpi_card_h = (hero_h - card_gap * max(num_cards - 1, 1)) / max(num_cards, 1)
 
     # ── KPI Cards (LEFT 1/3) ──
@@ -539,98 +683,164 @@ def main():
         cy = hero_y + i * (kpi_card_h + card_gap)
         pdf.draw_card(ML, cy, COL_W, kpi_card_h, r=3.5)
 
-        ds = datasets[i]
-        article = ds.get("article_display", "—")
-        project = ds.get("project", "")
-        lang = project.split(".")[0].upper()
-        accent_c = DS_ACCENTS[i % len(DS_ACCENTS)]
+        if i < len(datasets):
+            ds = datasets[i]
+            article = ds.get("article_display", "—")
+            project = ds.get("project", "")
+            lang = project.split(".")[0].upper()
+            accent_c = DS_ACCENTS[i % len(DS_ACCENTS)]
 
-        # Left accent stripe
-        pdf.set_fill_color(*accent_c)
-        pdf.rect(ML, cy, 3.2, kpi_card_h, style="F", round_corners=True, corner_radius=1.5)
+            # Left accent stripe
+            pdf.set_fill_color(*accent_c)
+            pdf.rect(ML, cy, 3.2, kpi_card_h, style="F", round_corners=True, corner_radius=1.5)
 
-        # ── Card Top Header Row (cy + 3.8) ──
-        badge_bg = (238, 242, 255) if i == 0 else (255, 241, 242) if i == 1 else (240, 253, 250)
-        pdf.draw_pill(ML + 6.0, cy + 3.6, text=lang, bg=badge_bg, tc=accent_c, font_size=6.8, bold=True, h=4.4)
+            # ── Card Top Header Row (cy + 3.8) ──
+            badge_bg = (238, 242, 255) if i == 0 else (255, 241, 242) if i == 1 else (240, 253, 250)
+            pdf.draw_pill(ML + 6.0, cy + 3.6, text=lang, bg=badge_bg, tc=accent_c, font_size=6.8, bold=True, h=4.4)
 
-        # Domain Badge (Right-aligned)
-        pdf.set_xy(ML + COL_W - 35.0, cy + 3.6)
-        pdf.set_font(ff, "", 7.2)
-        pdf.set_text_color(*TEXT_400)
-        pdf.cell(29.0, 4.4, project, align="R")
+            # Domain Badge (Right-aligned)
+            pdf.set_xy(ML + COL_W - 35.0, cy + 3.6)
+            pdf.set_font(ff, "", 7.2)
+            pdf.set_text_color(*TEXT_400)
+            pdf.cell(29.0, 4.4, project, align="R")
 
-        # ── Article Title (cy + 9.0, full card width, 10.2pt Bold) ──
-        pdf.set_xy(ML + 6.0, cy + 9.0)
-        pdf.set_font(ff, "B", 10.2)
-        pdf.set_text_color(*TEXT_900)
-        # If article contains CJK/Hangul glyphs that DejaVu lacks, provide clean Latin fallback
-        if any(0x2E80 <= ord(c) <= 0xD7AF for c in article):
-            article = "Stock market" if "주식" in article else ds.get("article", "Topic").replace("_", " ")
+            # ── Article Title (cy + 9.0, full card width, 10.2pt Bold) ──
+            pdf.set_xy(ML + 6.0, cy + 9.0)
+            pdf.set_font(ff, "B", 10.2)
+            pdf.set_text_color(*TEXT_900)
+            # If article contains CJK/Hangul glyphs that DejaVu lacks, provide clean Latin fallback
+            if any(0x2E80 <= ord(c) <= 0xD7AF for c in article):
+                article = "Stock market" if "주식" in article else ds.get("article", "Topic").replace("_", " ")
 
-        avail_art_w = COL_W - 12.0  # 76.0 mm available!
-        art_wrapped = smart_wrap_uk(article)
-        if pdf.get_string_width(article) <= avail_art_w:
-            pdf.cell(avail_art_w, 5.0, article)
+            avail_art_w = COL_W - 12.0  # 76.0 mm available!
+            art_wrapped = smart_wrap_uk(article)
+            if pdf.get_string_width(article) <= avail_art_w:
+                pdf.cell(avail_art_w, 5.0, article)
+            else:
+                pdf.multi_cell(avail_art_w, 4.4, art_wrapped, align="L")
+
+            # Subtle card divider line
+            pdf.set_draw_color(*DIVIDER_LINE)
+            pdf.set_line_width(0.3)
+            pdf.line(ML + 6.0, cy + 15.0, ML + COL_W - 6.0, cy + 15.0)
+
+            # ── Metrics 2-Column Section (cy + 16.5) ──
+            total = ds.get("total_views", 0)
+            avg = ds.get("avg_views", 0)
+            tot_str = fmt_kpi_total(total)
+            avg_str = fmt_kpi_monthly(avg)
+
+            # Metric 1: Total Views (Left column)
+            pdf.set_xy(ML + 6.0, cy + 16.5)
+            pdf.set_font(ff, "B", 6.8)
+            pdf.set_text_color(*TEXT_400)
+            pdf.cell(38.0, 3.2, "ЗАГАЛЬНИЙ ПОПИТ")
+
+            avail_w1 = 38.0
+            pdf.set_xy(ML + 6.0, cy + 20.0)
+            pdf.set_font(ff, "B", 17.0)
+            while pdf.get_string_width(tot_str) > avail_w1 and pdf.font_size_pt > 12.0:
+                pdf.set_font(ff, "B", pdf.font_size_pt - 0.5)
+            pdf.set_text_color(*TEXT_900)
+            pdf.cell(avail_w1, 7.5, tot_str)
+
+            # Metric 2: Monthly Average (Right column)
+            pdf.set_xy(ML + 47.0, cy + 16.5)
+            pdf.set_font(ff, "B", 6.8)
+            pdf.set_text_color(*TEXT_400)
+            pdf.cell(35.0, 3.2, "СЕРЕДНІЙ ПОМІСЯЧНО")
+
+            avail_w2 = 35.0
+            pdf.set_xy(ML + 47.0, cy + 20.8)
+            pdf.set_font(ff, "B", 12.5)
+            while pdf.get_string_width(avg_str) > avail_w2 and pdf.font_size_pt > 9.0:
+                pdf.set_font(ff, "B", pdf.font_size_pt - 0.5)
+            pdf.set_text_color(*TEXT_700)
+            pdf.cell(avail_w2, 6.5, avg_str)
+
+            # ── Bottom Status Row (cy + 33.5) ──
+            trend = ds.get("trend", {})
+            pct = trend.get("change_percent_total", 0.0)
+            arrow = "▲" if pct > 0 else "▼"
+            badge_lbl = f"{arrow} {pct:+.1f}%"
+            badge_bg = GREEN_BG if pct > 0 else RED_BG
+            badge_tc = GREEN_TEXT if pct > 0 else RED_TEXT
+            tpw = pdf.draw_pill(ML + 6.0, cy + 33.5, badge_lbl, bg=badge_bg, tc=badge_tc, font_size=7.6, h=5.2)
+
+            # R² + Business Interpretation
+            r2 = trend.get("r_squared", 0.0)
+            if r2 >= 0.7:
+                interp = "Стійкий тренд"
+            elif r2 >= 0.4:
+                interp = "Помітний тренд"
+            elif r2 >= 0.15:
+                interp = "Сезонна волатильність"
+            else:
+                interp = "Нестабільний попит"
+
+            pdf.set_xy(ML + 6.0 + tpw + 3.5, cy + 34.2)
+            pdf.set_font(ff, "", 7.2)
+            pdf.set_text_color(*TEXT_500)
+            pdf.cell(COL_W - tpw - 15.0, 3.8, f"R² = {r2:.2f}  •  {interp}")
         else:
-            pdf.multi_cell(avail_art_w, 4.4, art_wrapped, align="L")
+            # Placeholder card for not_found language
+            nf_idx = i - len(datasets)
+            nf_lang = not_found[nf_idx].upper()
+            nf_project = f"{not_found[nf_idx].lower()}.wikipedia.org"
+            slate_accent = (148, 163, 184)
 
-        # Subtle card divider line
-        pdf.set_draw_color(*DIVIDER_LINE)
-        pdf.set_line_width(0.3)
-        pdf.line(ML + 6.0, cy + 15.0, ML + COL_W - 6.0, cy + 15.0)
+            # Left accent stripe
+            pdf.set_fill_color(*slate_accent)
+            pdf.rect(ML, cy, 3.2, kpi_card_h, style="F", round_corners=True, corner_radius=1.5)
 
-        # ── Metrics 2-Column Section (cy + 16.5) ──
-        total = ds.get("total_views", 0)
-        avg = ds.get("avg_views", 0)
-        tot_str = fmt_n(total)
-        avg_str = fmt_n(int(avg))
+            # ── Card Top Header Row (cy + 3.8) ──
+            pdf.draw_pill(ML + 6.0, cy + 3.6, text=nf_lang, bg=(241, 245, 249), tc=(100, 116, 139), font_size=6.8, bold=True, h=4.4)
 
-        # Metric 1: Total Views (Left column)
-        pdf.set_xy(ML + 6.0, cy + 16.5)
-        pdf.set_font(ff, "B", 6.8)
-        pdf.set_text_color(*TEXT_400)
-        pdf.cell(38.0, 3.2, "ЗАГАЛЬНИЙ ПОПИТ")
+            # Domain Badge (Right-aligned)
+            pdf.set_xy(ML + COL_W - 35.0, cy + 3.6)
+            pdf.set_font(ff, "", 7.2)
+            pdf.set_text_color(*TEXT_400)
+            pdf.cell(29.0, 4.4, nf_project, align="R")
 
-        pdf.set_xy(ML + 6.0, cy + 20.0)
-        pdf.set_font(ff, "B", 17.0)
-        pdf.set_text_color(*TEXT_900)
-        pdf.cell(38.0, 7.5, tot_str)
+            # ── Article Title (cy + 9.0) ──
+            pdf.set_xy(ML + 6.0, cy + 9.0)
+            pdf.set_font(ff, "B", 9.5)
+            pdf.set_text_color(*TEXT_500)
+            pdf.cell(COL_W - 12.0, 5.0, "Статтю не знайдено у Вікіпедії")
 
-        # Metric 2: Monthly Average (Right column)
-        pdf.set_xy(ML + 47.0, cy + 16.5)
-        pdf.set_font(ff, "B", 6.8)
-        pdf.set_text_color(*TEXT_400)
-        pdf.cell(35.0, 3.2, "СЕРЕДНІЙ ПОМІСЯЧНО")
+            # Subtle card divider line
+            pdf.set_draw_color(*DIVIDER_LINE)
+            pdf.set_line_width(0.3)
+            pdf.line(ML + 6.0, cy + 15.0, ML + COL_W - 6.0, cy + 15.0)
 
-        pdf.set_xy(ML + 47.0, cy + 20.8)
-        pdf.set_font(ff, "B", 12.5)
-        pdf.set_text_color(*TEXT_700)
-        pdf.cell(35.0, 6.5, f"{avg_str} / міс")
+            # ── Metrics 2-Column Section (cy + 16.5) ──
+            pdf.set_xy(ML + 6.0, cy + 16.5)
+            pdf.set_font(ff, "B", 6.8)
+            pdf.set_text_color(*TEXT_400)
+            pdf.cell(38.0, 3.2, "ЗАГАЛЬНИЙ ПОПИТ")
 
-        # ── Bottom Status Row (cy + 33.5) ──
-        trend = ds.get("trend", {})
-        pct = trend.get("change_percent_total", 0.0)
-        arrow = "▲" if pct > 0 else "▼"
-        badge_lbl = f"{arrow} {pct:+.1f}%"
-        badge_bg = GREEN_BG if pct > 0 else RED_BG
-        badge_tc = GREEN_TEXT if pct > 0 else RED_TEXT
-        tpw = pdf.draw_pill(ML + 6.0, cy + 33.5, badge_lbl, bg=badge_bg, tc=badge_tc, font_size=7.6, h=5.2)
+            pdf.set_xy(ML + 6.0, cy + 20.0)
+            pdf.set_font(ff, "B", 17.0)
+            pdf.set_text_color(*TEXT_400)
+            pdf.cell(38.0, 7.5, "0")
 
-        # R² + Business Interpretation
-        r2 = trend.get("r_squared", 0.0)
-        if r2 >= 0.7:
-            interp = "Стійкий тренд"
-        elif r2 >= 0.4:
-            interp = "Помітний тренд"
-        elif r2 >= 0.15:
-            interp = "Сезонна волатильність"
-        else:
-            interp = "Нестабільний попит"
+            pdf.set_xy(ML + 47.0, cy + 16.5)
+            pdf.set_font(ff, "B", 6.8)
+            pdf.set_text_color(*TEXT_400)
+            pdf.cell(35.0, 3.2, "СЕРЕДНІЙ ПОМІСЯЧНО")
 
-        pdf.set_xy(ML + 6.0 + tpw + 3.5, cy + 34.2)
-        pdf.set_font(ff, "", 7.2)
-        pdf.set_text_color(*TEXT_500)
-        pdf.cell(COL_W - tpw - 15.0, 3.8, f"R² = {r2:.2f}  •  {interp}")
+            pdf.set_xy(ML + 47.0, cy + 20.8)
+            pdf.set_font(ff, "B", 12.5)
+            pdf.set_text_color(*TEXT_400)
+            pdf.cell(35.0, 6.5, "0 / міс")
+
+            # ── Bottom Status Row (cy + 33.5) ──
+            tpw = pdf.draw_pill(ML + 6.0, cy + 33.5, "⚪ Немає статті", bg=(241, 245, 249), tc=(100, 116, 139), font_size=7.6, h=5.2)
+
+            pdf.set_xy(ML + 6.0 + tpw + 3.5, cy + 34.2)
+            pdf.set_font(ff, "", 7.2)
+            pdf.set_text_color(*TEXT_500)
+            pdf.cell(COL_W - tpw - 15.0, 3.8, "Ознака несформованого ринку")
 
     # ── Chart Card (RIGHT 2/3) ──
     pdf.draw_card(CHART_X, hero_y, CHART_W, hero_h, r=3.5)

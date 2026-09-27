@@ -38,11 +38,11 @@ def main():
     parser.add_argument("--width", type=float, default=10.5, help="Chart width in inches")
     parser.add_argument("--height", type=float, default=5.2, help="Chart height in inches")
     parser.add_argument("--trend-line", action="store_true", help="Add subtle linear trend lines")
-    
+
     args = parser.parse_args()
-    
+
     datasets = []
-    
+
     for i, input_file in enumerate(args.input):
         try:
             with open(input_file, 'r', encoding='utf-8') as f:
@@ -51,20 +51,20 @@ def main():
             print(json.dumps({"error": f"Failed to read {input_file}: {e!s}"}), file=sys.stdout)
             print(f"Error reading {input_file}: {e}", file=sys.stderr)
             sys.exit(1)
-            
+
         project = data.get("project", "unknown")
         article = data.get("article_display", data.get("article", "Unknown"))
         label = f"{article} ({project.split('.')[0]})"
-        
+
         points = data.get("data", [])
         if not points:
             continue
-            
+
         points.sort(key=lambda x: x.get("timestamp", ""))
-        
+
         timestamps = [p.get("timestamp") for p in points]
         views = [p.get("views", 0) for p in points]
-        
+
         color = PALETTE[i % len(PALETTE)]
         datasets.append({
             "label": label,
@@ -72,15 +72,15 @@ def main():
             "views": views,
             "color": color
         })
-    
+
     if not datasets:
         print(json.dumps({"error": "No data found in input files."}), file=sys.stdout)
         sys.exit(1)
-        
-    # ── Typography & RC params ──
+
     plt.rcParams.update({
         'font.family': 'sans-serif',
-        'font.sans-serif': ['AppleGothic', 'Noto Sans CJK KR', 'Arial Unicode MS', 'DejaVu Sans', 'sans-serif'],
+        'font.sans-serif': ['Arial Unicode MS', 'DejaVu Sans', 'AppleGothic', 'Noto Sans CJK KR', 'sans-serif'],
+        'axes.unicode_minus': False,
         'axes.edgecolor': '#D0D0D0',
         'axes.linewidth': 0.6,
         'xtick.color': '#6B7280',
@@ -90,21 +90,21 @@ def main():
         'axes.facecolor': BG_COLOR,
         'axes.labelcolor': '#6B7280',
     })
-    
+
     # ── Symmetrical Layout Matched to Card (180.5 x 85.0 mm) ──
     fig_w_in = args.width if args.width != 10.5 else (180.5 / 25.4)
     fig_h_in = args.height if args.height != 5.2 else (85.0 / 25.4)
     fig = plt.figure(figsize=(fig_w_in, fig_h_in), dpi=200, facecolor=BG_COLOR)
-    
+
     card_w_mm = fig_w_in * 25.4
     left_ratio = 16.0 / card_w_mm
-    right_ratio = 1.0 - (6.5 / card_w_mm)
+    right_ratio = 1.0 - (10.0 / card_w_mm)
     bottom_ratio = 0.17
     top_ratio = 0.96
-    
+
     ax = fig.add_axes([left_ratio, bottom_ratio, right_ratio - left_ratio, top_ratio - bottom_ratio])
     ax.set_facecolor(BG_COLOR)
-    
+
     # ── Minimal spines: only bottom + left, very thin ──
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -112,12 +112,12 @@ def main():
     ax.spines['left'].set_linewidth(0.5)
     ax.spines['bottom'].set_color('#E5E7EB')
     ax.spines['bottom'].set_linewidth(0.5)
-    
+
     # ── Subtle horizontal gridlines (Tableau hallmark) ──
     ax.yaxis.grid(True, color='#F3F4F6', linewidth=0.8, linestyle='-')
     ax.xaxis.grid(False)
     ax.set_axisbelow(True)
-    
+
     all_dates = []
 
     for ds in datasets:
@@ -134,14 +134,14 @@ def main():
                     parsed_dates.append(datetime.strptime(ts[:10], "%Y-%m-%d"))
             except ValueError:
                 pass
-                
+
         color = ds["color"]
-        
+
         if len(parsed_dates) == len(ds["views"]) and parsed_dates:
             all_dates.extend(parsed_dates)
             # Semi-transparent area fill (Tableau-style subtle shading)
             ax.fill_between(parsed_dates, ds["views"], color=color, alpha=0.07)
-            
+
             # Thin smooth line — Tableau aesthetic: no markers for clean look
             ax.plot(
                 parsed_dates,
@@ -152,7 +152,7 @@ def main():
                 solid_capstyle='round',
                 solid_joinstyle='round',
             )
-            
+
             # Small dot markers at data points — very subtle
             ax.scatter(
                 parsed_dates,
@@ -163,7 +163,7 @@ def main():
                 edgecolors='white',
                 linewidths=0.8,
             )
-            
+
             # Subtle dashed linear trend
             if args.trend_line and len(ds["views"]) > 1:
                 x_num = mdates.date2num(parsed_dates)
@@ -196,21 +196,26 @@ def main():
 
     # ── Tick styling: no tick marks, just labels ──
     ax.tick_params(axis='both', which='both', length=0, labelsize=8.5, pad=6)
-    
+
+    # ── Ensure last tick label never overflows right margin ──
+    fig.canvas.draw()
+    x_labels = ax.xaxis.get_majorticklabels()
+    if x_labels:
+        x_labels[-1].set_horizontalalignment('right')
+
     # ── Y-axis: smart formatter (thousands with commas, millions as M) ──
     def format_y_axis(val, _):
         if val >= 1_000_000:
             return f"{val*1e-6:.1f}M".replace(".0M", "M")
         return f"{val:,.0f}"
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(format_y_axis))
-    
+
     # Y-axis label omitted here; unit is displayed in card title for maximal width
-    # ax.set_ylabel("Перегляди / місяць", fontsize=9, labelpad=10)
-    
+
     # ── Optional Title (left-aligned, Tableau style) ──
     if args.title:
         ax.set_title(args.title, fontsize=12, weight='bold', color='#1F2937', pad=16, loc='left')
-        
+
     # ── Legend: clean, horizontal, centered relative to figure & bottom two columns ──
     fig.legend(
         loc='upper center',
@@ -224,7 +229,7 @@ def main():
         handletextpad=0.6,
         columnspacing=2.5,
     )
-    
+
     # ── Add min Y padding ──
     y_min, y_max = ax.get_ylim()
     ax.set_ylim(bottom=max(0, y_min - (y_max - y_min) * 0.05))
