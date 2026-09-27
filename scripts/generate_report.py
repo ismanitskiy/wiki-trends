@@ -272,25 +272,26 @@ def main():
 
             tbw = pdf.draw_pill(ML + 6.0, cy + 25.5, badge_lbl, bg=badge_bg, tc=badge_tc, font_size=7.6, h=5.2)
 
-            # Business characterization of the trend (instead of raw R²)
+            # Business characterization of the trend with R²
+            r2 = trend.get("r_squared", 0.0)
             if i == 0:
-                char_text = "Характер: Висока сезонна волатильність"
+                char_text = f"R² = {r2:.2f}  •  Висока сезонна волатильність"
             else:
-                char_text = "Характер: Помірні коливання (більш стабільний)"
+                char_text = f"R² = {r2:.2f}  •  Помірні коливання (стабільніший)"
 
             pdf.set_xy(ML + 6.0, cy + 34.5)
-            pdf.set_font(ff, "", 7.0)
+            pdf.set_font(ff, "", 6.8)
             pdf.set_text_color(*TEXT_500)
             pdf.cell(COL_W - 12, 4.0, char_text)
 
     # ── RIGHT: MAIN CHART CARD (Matches Column 2 + Column 3 below) ──
     pdf.draw_card(CHART_X, hero_y, CHART_W, hero_h, r=3.5)
 
-    # Header inside chart card
+    # Header inside chart card (including unit)
     pdf.set_xy(CHART_X + 6.0, hero_y + 3.8)
     pdf.set_font(ff, "B", 7.8)
     pdf.set_text_color(*TEXT_500)
-    pdf.cell(CHART_W - 12, 4.0, "ДИНАМІКА ПОПИТУ ТА ДОВГОСТРОКОВИЙ ТРЕНД (24 МІСЯЦІ)")
+    pdf.cell(CHART_W - 12, 4.0, "ДИНАМІКА ПОПИТУ ТА ДОВГОСТРОКОВИЙ ТРЕНД (ПЕРЕГЛЯДИ / МІСЯЦЬ, 24 МІСЯЦІ)")
 
     # Embed chart image
     if os.path.exists(args.chart):
@@ -301,9 +302,9 @@ def main():
 
     # ═══════════════════════════════════════════════════════════
     # 3. BOTTOM ROW: THREE EQUAL COLUMNS (y: 127.5 to 200.0, h: 72.5 mm)
-    # Col 1: Strategic Product Decision Memo
-    # Col 2: Market Signals & Anomalies
-    # Col 3: Boundaries of Confidence & Limitations
+    # Col 1: Strategic Product Decision Memo (Grounded in data)
+    # Col 2: Market Signals & Anomalies (Seasonality, YoY)
+    # Col 3: Boundaries of Confidence & Limitations (Methodology)
     # ═══════════════════════════════════════════════════════════
     bot_y = 127.5
     bot_h = 72.5
@@ -312,7 +313,7 @@ def main():
     col2_x = ML + COL_W + GAP
     col3_x = col2_x + COL_W + GAP
 
-    # ── COLUMN 1: 1. РІШЕННЯ ДЛЯ ПРОДУКТУ (Strategic Product Decision) ──
+    # ── COLUMN 1: 1. РІШЕННЯ ДЛЯ ПРОДУКТУ ──
     pdf.draw_card(col1_x, bot_y, COL_W, bot_h, r=3.5)
 
     # Top accent bar (Indigo)
@@ -326,36 +327,36 @@ def main():
     pdf.set_text_color(*INDIGO_PRIMARY)
     pdf.cell(COL_W - 18, 4.5, "РІШЕННЯ ДЛЯ ПРОДУКТУ")
 
-    # Concrete business decision for the founder
-    decision_p1 = "Запуск курсу з астрономії виключно під ринок України є ризикованим: стабільного органічного попиту немає, загальний тренд спадає (-67%), а активність тримається лише на шкільній програмі 11 класу у вересні."
+    # Concrete business decision for the founder (concise, no overflow)
+    decision_p1 = "Запуск курсу з астрономії суто під ринок України є ризикованим: попит падає (-67.2%), а 27% річного трафіку зосереджено в одному вересні (шкільна програма 11 класу)."
 
     pdf.set_xy(col1_x + 6, bot_y + 13.5)
-    pdf.set_font(ff, "", 7.8)
+    pdf.set_font(ff, "", 7.5)
     pdf.set_text_color(*TEXT_700)
-    pdf.multi_cell(COL_W - 12, 3.8, decision_p1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.multi_cell(COL_W - 12, 3.5, decision_p1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # Actionable bullets for product expansion
     p1_bullets = [
-        ("Пріоритет ринку", "Для масштабного запуску обирати Global EN: ринок у 12.4x більший (39.4k проти 3.2k/міс) і менш волатильний."),
-        ("Сезонний спецпроєкт", "В Україні продукт варто позиціонувати як короткий інтенсив наприкінці серпня під вересневий навчальний пік."),
-        ("Зміна формату", "Для залучення платоспроможних дорослих замінити академічну теорію на прикладну астрофотографію.")
+        ("Пріоритет ринку", "Для масштабування обирати Global EN: попит у 12.4x більший (39.4k проти 3.2k/міс) і менш волатильний."),
+        ("Сезонний спецпроєкт", "В Україні продукт варто позиціонувати як короткий інтенсив наприкінці серпня під осінній підйом."),
+        ("Позиціонування", "Для залучення дорослої платоспроможної аудиторії акцентувати практичні навички, а не шкільну теорію.")
     ]
 
-    by1 = pdf.get_y() + 2.0
+    by1 = pdf.get_y() + 1.8
     for b_title, b_desc in p1_bullets:
         pdf.set_fill_color(*INDIGO_PRIMARY)
         pdf.ellipse(col1_x + 6, by1 + 1.2, 1.6, 1.6, style="F")
         pdf.set_xy(col1_x + 9.5, by1)
         pdf.set_font(ff, "B", 7.4)
         pdf.set_text_color(*TEXT_900)
-        pdf.cell(COL_W - 15, 3.5, b_title + ":")
-        pdf.set_xy(col1_x + 9.5, by1 + 3.4)
-        pdf.set_font(ff, "", 7.2)
+        pdf.cell(COL_W - 15, 3.3, b_title + ":")
+        pdf.set_xy(col1_x + 9.5, by1 + 3.2)
+        pdf.set_font(ff, "", 7.0)
         pdf.set_text_color(*TEXT_700)
-        pdf.multi_cell(COL_W - 15, 3.2, b_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        by1 = pdf.get_y() + 1.5
+        pdf.multi_cell(COL_W - 15, 3.0, b_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        by1 = pdf.get_y() + 1.2
 
-    # ── COLUMN 2: 2. СИГНАЛИ ТА АНОМАЛІЇ (Market Signals & Seasonality) ──
+    # ── COLUMN 2: 2. СИГНАЛИ ТА АНОМАЛІЇ ──
     pdf.draw_card(col2_x, bot_y, COL_W, bot_h, r=3.5)
 
     # Top accent bar (Teal)
@@ -369,14 +370,14 @@ def main():
     pdf.cell(COL_W - 18, 4.5, "СИГНАЛИ ТА АНОМАЛІЇ")
 
     signals = [
-        ("Вересневий шкільний сплеск (Z = 3.17)",
-         "Вересень 2022 та 2023 року фіксує підйом до 10.5 тис. переглядів (у 3.3 рази вище норми) на старті вивчення астрономії в 11 класі."),
+        ("Вересневий сплеск (Z = 3.17)",
+         "У вересні 2022 та 2023 року попит підскакує до 10.5 тис. переглядів (у 3.3 рази вище норми) на старті шкільного курсу 11 класу."),
         ("Сезонне літнє дно (-80% активності)",
-         "У червні–серпні попит в Україні падає до мінімальних 637 переглядів. Улітку залучати учнів органічно практично неможливо."),
+         "У червні–серпні попит в Україні падає до мінімальних 637 переглядів — період мінімальної органічної активності."),
         ("Річна динаміка попиту (YoY)",
-         "Після різкого сплеску інтересу у 2023 році (+92.6%) у 2024 році відбулася корекція зі спадом на -60.8%."),
+         "UK: різкий підйом у 2023 (+92.6%) та спад у 2024 (-60.8%); EN: зростання на +183.1% та плавна корекція на -34.1%."),
         ("Стабільність глобального попиту",
-         "Англомовний розділ (en.wikipedia.org) демонструє стабільний трафік без екстремальних шкільних розривів (спад лише -11.8%).")
+         "Англомовний розділ (en) демонструє стабільний річний трафік без різких шкільних розривів (спад лише -11.8%).")
     ]
 
     by2 = bot_y + 13.5
@@ -386,14 +387,14 @@ def main():
         pdf.set_xy(col2_x + 9.5, by2)
         pdf.set_font(ff, "B", 7.4)
         pdf.set_text_color(*TEXT_900)
-        pdf.cell(COL_W - 15, 3.5, s_title)
-        pdf.set_xy(col2_x + 9.5, by2 + 3.4)
-        pdf.set_font(ff, "", 7.2)
+        pdf.cell(COL_W - 15, 3.3, s_title)
+        pdf.set_xy(col2_x + 9.5, by2 + 3.2)
+        pdf.set_font(ff, "", 7.0)
         pdf.set_text_color(*TEXT_700)
-        pdf.multi_cell(COL_W - 15, 3.2, s_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        by2 = pdf.get_y() + 1.5
+        pdf.multi_cell(COL_W - 15, 3.0, s_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        by2 = pdf.get_y() + 1.2
 
-    # ── COLUMN 3: 3. МЕЖІ ДОВІРИ ТА ПРИПУЩЕННЯ (Methodology & Limitations) ──
+    # ── COLUMN 3: 3. МЕЖІ ДОВІРИ ТА ПРИПУЩЕННЯ ──
     pdf.draw_card(col3_x, bot_y, COL_W, bot_h, r=3.5)
 
     # Top accent bar (Slate)
@@ -408,13 +409,13 @@ def main():
 
     limits = [
         ("Інтерес ≠ готовність платити",
-         "Перегляди статей Вікіпедії відображають довідкову цікавість до термінів, а не сформовану готовність купувати платний курс."),
+         "Перегляд статті Вікіпедії відображає довідковий інтерес до теми, а не сформовану готовність купувати платний курс."),
+        ("Низька база переглядів UK",
+         "Влітку денний трафік UK падає до ~20 переглядів/день, що підвищує статистичну волатильність і похибку вибірки."),
         ("Фільтрація ботів (agent=user)",
-         "Використано дані лише реальних користувачів, проте частина автоматизованих скраперів може залишатися у статистиці."),
+         "Використано дані реальних користувачів, проте частина автоматизованих AI-скраперів може залишатися у вибірці."),
         ("Вплив зовнішніх медіа-подій",
-         "Астрономічні явища (затемнення, метеорні дощі, запуски місій) створюють короткі неорганічні сплески інтересу."),
-        ("Вища похибка малих розділів",
-         "Український розділ Вікіпедії має меншу вибірку, тому статистична волатильність і похибка тут вищі, ніж в англійському.")
+         "Астрономічні явища (затемнення, запуски NASA) створюють короткочасні неорганічні сплески інтересу.")
     ]
 
     by3 = bot_y + 13.5
@@ -424,12 +425,12 @@ def main():
         pdf.set_xy(col3_x + 9.5, by3)
         pdf.set_font(ff, "B", 7.4)
         pdf.set_text_color(*TEXT_900)
-        pdf.cell(COL_W - 15, 3.5, l_title)
-        pdf.set_xy(col3_x + 9.5, by3 + 3.4)
-        pdf.set_font(ff, "", 7.2)
+        pdf.cell(COL_W - 15, 3.3, l_title)
+        pdf.set_xy(col3_x + 9.5, by3 + 3.2)
+        pdf.set_font(ff, "", 7.0)
         pdf.set_text_color(*TEXT_700)
-        pdf.multi_cell(COL_W - 15, 3.2, l_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        by3 = pdf.get_y() + 1.5
+        pdf.multi_cell(COL_W - 15, 3.0, l_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        by3 = pdf.get_y() + 1.2
 
     # ═══════════════════════════════════════════════════════════
     # Save Report

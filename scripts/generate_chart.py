@@ -182,8 +182,8 @@ def main():
     # ── Y-axis: thousands separator ──
     ax.yaxis.set_major_formatter(ticker.StrMethodFormatter('{x:,.0f}'))
     
-    # ── Axis labels ──
-    ax.set_ylabel("Перегляди / місяць", fontsize=9, labelpad=10)
+    # Y-axis label omitted here; unit is displayed in card title for maximal width
+    # ax.set_ylabel("Перегляди / місяць", fontsize=9, labelpad=10)
     
     # ── Optional Title (left-aligned, Tableau style) ──
     if args.title:
@@ -212,7 +212,7 @@ def main():
         plt.savefig(
             args.output, dpi=200,
             facecolor=BG_COLOR, edgecolor='none',
-            bbox_inches='tight', pad_inches=0.15
+            bbox_inches='tight', pad_inches=0.04
         )
         print(json.dumps({"status": "success", "output": args.output}), file=sys.stdout)
         sys.stderr.write(f"Chart successfully saved to {args.output}\n")
