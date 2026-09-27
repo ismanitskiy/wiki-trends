@@ -2,6 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "fpdf2>=2.7",
+#     "pyphen>=0.14.0",
 # ]
 # ///
 """
@@ -10,9 +11,9 @@ generate_report.py — Executive Landscape A4 Wikipedia Trends Report.
 Features:
 - 100% dynamic content from analyze_trends.py JSON.
 - Balanced 2-column KPI cards with zero empty dead space.
+- Automatic Ukrainian syllable hyphenation (pyphen uk_UA) + non-breaking spaces.
 - Beautiful, clean typography with proper left alignment (no stretched word gaps).
-- Automatic smart Ukrainian typography with non-breaking spaces for prepositions and numbers.
-- Legible font sizes (7.6–8.2 pt) filling cards down to standard margins (no bottom voids).
+- Legible font sizes (7.6–8.2 pt) filling cards down to balanced margins.
 - Auto-generated English filename with topic, compared languages, data period, and analysis date.
 - Auto-generated title and clean period display (no 'помісячно').
 - Optional --insights <file.json> for LLM-augmented product recommendations.
@@ -26,6 +27,14 @@ import sys
 from datetime import datetime
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
+
+try:
+    import pyphen
+    _pyphen_uk = pyphen.Pyphen(lang='uk_UA', left=2, right=2)
+except Exception:
+    _pyphen_uk = None
+
+SOFT_HYPHEN = "\u00ad"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -134,8 +143,10 @@ def fmt_months(months: list[int]) -> str:
 
 def smart_wrap_uk(text: str) -> str:
     """
-    Attach short Ukrainian prepositions and conjunctions to the following word
-    using non-breaking space to avoid trailing orphan words at line ends.
+    1. Attach short Ukrainian prepositions and conjunctions to the following word
+       using non-breaking space (\\u00a0) to avoid trailing orphan words at line ends.
+    2. Insert soft hyphens (\\u00ad) into Ukrainian words (6+ chars) according to
+       official Ukrainian syllabic hyphenation rules (left=2, right=2).
     """
     if not text:
         return ""
@@ -145,6 +156,17 @@ def smart_wrap_uk(text: str) -> str:
     text = re.sub(preps, r'\g<1>' + nbsp, text, flags=re.IGNORECASE)
     # Join numbers with units / multiplier (e.g. 12.4x, 3.3x)
     text = re.sub(r'(\d+)\s+([xх%])', r'\g<1>' + nbsp + r'\g<2>', text)
+
+    # Syllabic hyphenation with soft hyphens
+    if _pyphen_uk:
+        def _repl(match):
+            w = match.group(0)
+            if len(w) >= 6:
+                return _pyphen_uk.inserted(w, SOFT_HYPHEN)
+            return w
+        pattern = r'[а-яА-Яa-zA-ZєіїґЄІЇҐ\']+'
+        text = re.sub(pattern, _repl, text)
+
     return text
 
 
@@ -515,75 +537,68 @@ def main():
         pdf.set_fill_color(*accent_c)
         pdf.rect(ML, cy, 3.2, kpi_card_h, style="F", round_corners=True, corner_radius=1.5)
 
-        # ── Card Top Header (cy + 4.2) ──
+        # ── Card Top Header Row (cy + 3.8) ──
         badge_bg = (238, 242, 255) if i == 0 else (255, 241, 242) if i == 1 else (240, 253, 250)
-        lpw = pdf.draw_pill(ML + 6.0, cy + 4.0, text=lang, bg=badge_bg, tc=accent_c, font_size=6.8, bold=True, h=4.6)
+        lpw = pdf.draw_pill(ML + 6.0, cy + 3.6, text=lang, bg=badge_bg, tc=accent_c, font_size=6.8, bold=True, h=4.4)
 
-        # Article Title (Left) with adaptive sizing
-        avail_art_w = COL_W - lpw - 38.0
-        art_font_size = 9.5
-        pdf.set_font(ff, "B", art_font_size)
-        while pdf.get_string_width(article) > avail_art_w and art_font_size > 7.6:
-            art_font_size -= 0.4
-            pdf.set_font(ff, "B", art_font_size)
-
-        art_disp = article
-        if pdf.get_string_width(art_disp) > avail_art_w:
-            while len(art_disp) > 3 and pdf.get_string_width(art_disp + "…") > avail_art_w:
-                art_disp = art_disp[:-1]
-            art_disp += "…"
-
-        pdf.set_xy(ML + 6.0 + lpw + 2.5, cy + 4.0)
-        pdf.set_text_color(*TEXT_900)
-        pdf.cell(avail_art_w, 4.6, art_disp)
-
-        # Domain Badge (Right-aligned, utilizes right side of card!)
-        pdf.set_xy(ML + COL_W - 35.0, cy + 4.2)
+        # Domain Badge (Right-aligned)
+        pdf.set_xy(ML + COL_W - 35.0, cy + 3.6)
         pdf.set_font(ff, "", 7.2)
         pdf.set_text_color(*TEXT_400)
-        pdf.cell(29.0, 4.2, project, align="R")
+        pdf.cell(29.0, 4.4, project, align="R")
+
+        # ── Article Title (cy + 9.0, full card width, 10.2pt Bold) ──
+        pdf.set_xy(ML + 6.0, cy + 9.0)
+        pdf.set_font(ff, "B", 10.2)
+        pdf.set_text_color(*TEXT_900)
+        avail_art_w = COL_W - 12.0  # 76.0 mm available!
+        art_wrapped = smart_wrap_uk(article)
+        if pdf.get_string_width(article) <= avail_art_w:
+            pdf.cell(avail_art_w, 5.0, article)
+        else:
+            pdf.multi_cell(avail_art_w, 4.4, art_wrapped, align="L")
 
         # Subtle card divider line
         pdf.set_draw_color(*DIVIDER_LINE)
         pdf.set_line_width(0.3)
-        pdf.line(ML + 6.0, cy + 11.5, ML + COL_W - 6.0, cy + 11.5)
+        pdf.line(ML + 6.0, cy + 15.0, ML + COL_W - 6.0, cy + 15.0)
 
-        # ── Metrics 2-Column Section (cy + 13.5) ──
+        # ── Metrics 2-Column Section (cy + 16.5) ──
         total = ds.get("total_views", 0)
         avg = ds.get("avg_views", 0)
         tot_str = fmt_n(total)
         avg_str = fmt_n(int(avg))
 
         # Metric 1: Total Views (Left column)
-        pdf.set_xy(ML + 6.0, cy + 13.2)
+        pdf.set_xy(ML + 6.0, cy + 16.5)
         pdf.set_font(ff, "B", 6.8)
         pdf.set_text_color(*TEXT_400)
         pdf.cell(38.0, 3.2, "ЗАГАЛЬНИЙ ПОПИТ")
 
-        pdf.set_xy(ML + 6.0, cy + 16.8)
-        pdf.set_font(ff, "B", 17.5)
+        pdf.set_xy(ML + 6.0, cy + 20.0)
+        pdf.set_font(ff, "B", 17.0)
         pdf.set_text_color(*TEXT_900)
         pdf.cell(38.0, 7.5, tot_str)
 
-        # Metric 2: Monthly Average (Right column — fills white space!)
-        pdf.set_xy(ML + 47.0, cy + 13.2)
+        # Metric 2: Monthly Average (Right column)
+        pdf.set_xy(ML + 47.0, cy + 16.5)
         pdf.set_font(ff, "B", 6.8)
         pdf.set_text_color(*TEXT_400)
         pdf.cell(35.0, 3.2, "СЕРЕДНІЙ ПОМІСЯЧНО")
 
-        pdf.set_xy(ML + 47.0, cy + 17.5)
+        pdf.set_xy(ML + 47.0, cy + 20.8)
         pdf.set_font(ff, "B", 12.5)
         pdf.set_text_color(*TEXT_700)
         pdf.cell(35.0, 6.5, f"{avg_str} / міс")
 
-        # ── Bottom Status Row (cy + 32.5) ──
+        # ── Bottom Status Row (cy + 33.5) ──
         trend = ds.get("trend", {})
         pct = trend.get("change_percent_total", 0.0)
         arrow = "▲" if pct > 0 else "▼"
         badge_lbl = f"{arrow} {pct:+.1f}%"
         badge_bg = GREEN_BG if pct > 0 else RED_BG
         badge_tc = GREEN_TEXT if pct > 0 else RED_TEXT
-        tpw = pdf.draw_pill(ML + 6.0, cy + 32.0, badge_lbl, bg=badge_bg, tc=badge_tc, font_size=7.6, h=5.2)
+        tpw = pdf.draw_pill(ML + 6.0, cy + 33.5, badge_lbl, bg=badge_bg, tc=badge_tc, font_size=7.6, h=5.2)
 
         # R² + Business Interpretation
         r2 = trend.get("r_squared", 0.0)
@@ -596,7 +611,7 @@ def main():
         else:
             interp = "Нестабільний попит"
 
-        pdf.set_xy(ML + 6.0 + tpw + 3.5, cy + 33.0)
+        pdf.set_xy(ML + 6.0 + tpw + 3.5, cy + 34.2)
         pdf.set_font(ff, "", 7.2)
         pdf.set_text_color(*TEXT_500)
         pdf.cell(COL_W - tpw - 15.0, 3.8, f"R² = {r2:.2f}  •  {interp}")
