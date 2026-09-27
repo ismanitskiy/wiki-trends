@@ -630,11 +630,11 @@ def main():
 
     # ── Chart Card (RIGHT 2/3) ──
     pdf.draw_card(CHART_X, hero_y, CHART_W, hero_h, r=3.5)
-    # Title aligned precisely with the vertical Y-axis spine (16.0 mm from left card border)
-    pdf.set_xy(CHART_X + 16.0, hero_y + 4.0)
+    # Title aligned precisely with the Y-axis tick values (10 000, 20 000, 30 000, 40 000)
+    pdf.set_xy(CHART_X + 2.2, hero_y + 4.0)
     pdf.set_font(ff, "B", 7.8)
     pdf.set_text_color(*TEXT_500)
-    pdf.cell(CHART_W - 32.0, 4.0, "ДИНАМІКА ПОПИТУ ТА ДОВГОСТРОКОВИЙ ТРЕНД (ПЕРЕГЛЯДИ / МІСЯЦЬ)")
+    pdf.cell(CHART_W - 12.0, 4.0, "ДИНАМІКА ПОПИТУ ТА ДОВГОСТРОКОВИЙ ТРЕНД (ПЕРЕГЛЯДИ / МІСЯЦЬ)")
 
     if os.path.exists(args.chart):
         try:

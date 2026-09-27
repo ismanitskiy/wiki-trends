@@ -91,8 +91,8 @@ def main():
         'axes.labelcolor': '#6B7280',
     })
     
-    # ── Symmetrical Layout Matched to Card (181.5 x 85.0 mm) ──
-    fig_w_in = args.width if args.width != 10.5 else (181.5 / 25.4)
+    # ── Symmetrical Layout Matched to Card (180.5 x 85.0 mm) ──
+    fig_w_in = args.width if args.width != 10.5 else (180.5 / 25.4)
     fig_h_in = args.height if args.height != 5.2 else (85.0 / 25.4)
     fig = plt.figure(figsize=(fig_w_in, fig_h_in), dpi=200, facecolor=BG_COLOR)
     
@@ -207,10 +207,11 @@ def main():
     if args.title:
         ax.set_title(args.title, fontsize=12, weight='bold', color='#1F2937', pad=16, loc='left')
         
-    # ── Legend: clean, horizontal, bottom-anchored, frameless ──
-    ax.legend(
+    # ── Legend: clean, horizontal, centered relative to figure & bottom two columns ──
+    fig.legend(
         loc='upper center',
-        bbox_to_anchor=(0.5, -0.13),
+        bbox_to_anchor=(0.5, 0.09),
+        bbox_transform=fig.transFigure,
         ncol=len(datasets),
         frameon=False,
         fontsize=8.5,
