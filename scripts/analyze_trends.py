@@ -184,10 +184,16 @@ def analyze_dataset(data):
     anomalies = detect_anomalies(data_list)
     seasonality = detect_seasonality(data_list)
     
+    start_date = data_list[0].get('timestamp', '') if data_list else ''
+    end_date = data_list[-1].get('timestamp', '') if data_list else ''
+
     return {
         "project": data.get("project", ""),
         "article": data.get("article", ""),
         "article_display": data.get("article_display", data.get("article", "")),
+        "start_date": start_date,
+        "end_date": end_date,
+        "data_points": len(data_list),
         "total_views": int(total_views),
         "avg_views": round(float(avg_views), 2),
         "median_views": round(float(median_views), 2),
