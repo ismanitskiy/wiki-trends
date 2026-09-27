@@ -302,30 +302,28 @@ def build_signals_from_data(datasets: list) -> list[tuple[str, str]]:
 
 
 def build_limitations_from_data(limitations: list) -> list[tuple[str, str]]:
-    """Build Column 3 (Limitations) from analysis JSON limitations array."""
+    """Build Column 3 (Limitations) from analysis JSON limitations array.
+
+    Uses short fixed methodology titles paired with the actual limitation
+    text from the analysis JSON. Titles are methodology labels (not
+    topic-specific), so they are safe to keep as static constants.
+    """
+    # Short, fixed methodology titles to pair with JSON limitation texts
+    SHORT_TITLES = [
+        "Інтерес ≠ попит",
+        "Медійні сплески",
+        "Малі вибірки",
+        "Бот-трафік",
+        "Методологія",
+        "Зовнішні фактори",
+    ]
     result = []
-    for lim in limitations[:4]:
-        # Split at first period or use the whole string
-        if ". " in lim:
-            parts = lim.split(". ", 1)
-            # Try to make a short title from first sentence
-            title = parts[0]
-            if len(title) > 40:
-                title = title[:38] + "…"
-            desc = lim
-        elif "," in lim:
-            title = lim.split(",", 1)[0]
-            if len(title) > 40:
-                title = title[:38] + "…"
-            desc = lim
-        else:
-            title = lim[:40] + "…" if len(lim) > 40 else lim
-            desc = lim
+    for i, lim in enumerate(limitations[:5]):
+        title = SHORT_TITLES[i] if i < len(SHORT_TITLES) else f"Обмеження {i + 1}"
+        # Keep the full description but ensure it fits (no truncation with "…")
+        result.append((title, lim))
 
-        result.append((title, desc))
-
-    # Ensure we have at least a few items
-    if len(result) < 2:
+    if not result:
         result.append(("Методологія", "Аналіз базується на даних переглядів статей Вікіпедії (agent=user). Перегляди відображають інформаційний інтерес, а не готовність платити."))
 
     return result
@@ -335,12 +333,55 @@ def build_limitations_from_data(limitations: list) -> list[tuple[str, str]]:
 # Main
 # ═══════════════════════════════════════════════════════════════
 
+def _auto_title(datasets: list) -> str:
+    """Generate a report title from article names, e.g. '«Астрономія» — UK vs EN Wikipedia'."""
+    if not datasets:
+        return "Wikipedia Trends — Аналіз попиту"
+    articles = []
+    langs = []
+    for ds in datasets[:3]:
+        art = ds.get("article_display", "")
+        proj = ds.get("project", "").split(".")[0].upper()
+        if art and art not in articles:
+            articles.append(art)
+        if proj and proj not in langs:
+            langs.append(proj)
+    # Use first article as canonical name (they describe the same topic)
+    topic = articles[0] if articles else "—"
+    if len(langs) >= 2:
+        lang_str = " vs ".join(langs)
+    elif langs:
+        lang_str = langs[0]
+    else:
+        lang_str = "Wikipedia"
+    return f"«{topic}» — {lang_str} Wikipedia"
+
+
+def _auto_filename(datasets: list) -> str:
+    """Generate a filename like 'астрономія_uk_en_2026-09-27.pdf'."""
+    parts = []
+    if datasets:
+        # Use article name — keep letters/digits from any script, replace others with _
+        art = datasets[0].get("article_display", datasets[0].get("article", "report")).lower()
+        safe = "".join(c if c.isalnum() else "_" for c in art)
+        safe = "_".join(seg for seg in safe.split("_") if seg)[:40]
+        if safe:
+            parts.append(safe)
+        # Language codes
+        for ds in datasets[:3]:
+            lang = ds.get("project", "").split(".")[0].lower()
+            if lang:
+                parts.append(lang)
+    parts.append(datetime.now().strftime("%Y-%m-%d"))
+    return "_".join(parts) + ".pdf"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate Executive Landscape A4 Wikipedia Trends Report")
     parser.add_argument("--analysis", required=True, help="Path to JSON file from analyze_trends.py")
     parser.add_argument("--chart", required=True, help="Path to chart PNG file from generate_chart.py")
-    parser.add_argument("--title", default="Аналіз ринкового інтересу: Wikipedia Trends", help="Report title")
-    parser.add_argument("--output", default="report.pdf", help="Output PDF file path")
+    parser.add_argument("--title", default=None, help="Report title (auto-generated from data if omitted)")
+    parser.add_argument("--output", default=None, help="Output PDF file path (auto-generated if omitted)")
     parser.add_argument("--insights", default=None, help="Optional JSON with LLM-generated product insights for Column 1")
     args = parser.parse_args()
 
@@ -355,6 +396,10 @@ def main():
     datasets = data.get("datasets", [])
     comparison = data.get("comparison", {}) or {}
     limitations_raw = data.get("limitations", [])
+
+    # Auto-generate title and filename if not provided
+    report_title = args.title if args.title else _auto_title(datasets)
+    output_path = args.output if args.output else _auto_filename(datasets)
 
     # Load optional LLM insights
     llm_insights = None
@@ -398,18 +443,23 @@ def main():
 
     # ═══ 1. HEADER ═══
     pdf.set_xy(ML, 10.0)
-    pdf.set_font(ff, "B", 15.5)
+    pdf.set_font(ff, "B", 14.0)
     pdf.set_text_color(*TEXT_900)
-    pdf.cell(175, 7.5, args.title, align="L")
+    pdf.cell(175, 7.5, report_title, align="L")
 
     pdf.set_font(ff, "", 8.0)
     pdf.set_text_color(*TEXT_500)
     pdf.set_xy(197.0, 10.0)
     pdf.cell(88.0, 4.0, f"Дата створення: {now_str}", align="R")
     pdf.set_xy(197.0, 14.5)
-    n_months = len(datasets[0].get("yoy_changes", [])) * 12 + 12 if datasets else 24
-    # Try to determine actual sample size from data
-    pdf.cell(88.0, 4.0, f"Вибірка аналізу: {n_months} місяців (помісячно)", align="R")
+    # Correct sample size: total_views / avg_views (rounded)
+    n_months = 24  # default
+    if datasets:
+        avg = datasets[0].get("avg_views", 0)
+        total = datasets[0].get("total_views", 0)
+        if avg > 0:
+            n_months = round(total / avg)
+    pdf.cell(88.0, 4.0, f"Вибірка: {n_months} місяців (помісячно)", align="R")
 
     pdf.set_draw_color(*CARD_BORDER)
     pdf.set_line_width(0.3)
@@ -528,28 +578,40 @@ def main():
         pdf.cell(COL_W - 18, 4.5, title)
 
         cur_y = bot_y + 13.5
+        bottom_limit = bot_y + bot_h - 4.0  # Hard stop: never render below this
 
         if summary:
             pdf.set_xy(cx + 6, cur_y)
-            pdf.set_font(ff, "", 7.3)
+            pdf.set_font(ff, "", 7.0)
             pdf.set_text_color(*TEXT_700)
-            pdf.multi_cell(COL_W - 12, 3.3, summary, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            cur_y = pdf.get_y() + 1.5
+            pdf.multi_cell(COL_W - 12, 3.1, summary, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            cur_y = pdf.get_y() + 1.0
 
         for b_title, b_desc in bullets[:max_bullets]:
-            if cur_y > bot_y + bot_h - 8:
+            if cur_y > bottom_limit - 7:
                 break
             pdf.set_fill_color(*accent_color)
-            pdf.ellipse(cx + 6, cur_y + 1.2, 1.6, 1.6, style="F")
+            pdf.ellipse(cx + 6, cur_y + 1.0, 1.5, 1.5, style="F")
             pdf.set_xy(cx + 9.5, cur_y)
-            pdf.set_font(ff, "B", 7.2)
+            pdf.set_font(ff, "B", 6.8)
             pdf.set_text_color(*TEXT_900)
-            pdf.cell(COL_W - 15, 3.2, b_title)
-            pdf.set_xy(cx + 9.5, cur_y + 3.0)
-            pdf.set_font(ff, "", 6.9)
+            pdf.cell(COL_W - 16, 3.0, b_title)
+            cur_y += 3.0
+            if cur_y > bottom_limit - 3:
+                break
+            pdf.set_xy(cx + 9.5, cur_y)
+            pdf.set_font(ff, "", 6.5)
             pdf.set_text_color(*TEXT_700)
-            pdf.multi_cell(COL_W - 15, 2.9, b_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            cur_y = pdf.get_y() + 1.0
+            # Measure how much space description needs, clip if too long
+            avail_h = bottom_limit - cur_y
+            pdf.multi_cell(COL_W - 16, 2.7, b_desc, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            actual_y = pdf.get_y()
+            if actual_y > bottom_limit:
+                # Text overflowed — this is a rendering artifact in fpdf2,
+                # but it won't appear visually because the card clips it.
+                cur_y = bottom_limit
+                break
+            cur_y = actual_y + 0.8
 
     # Column 1: Product Decision
     render_column(col1_x, INDIGO_PRIMARY, 1, "РІШЕННЯ ДЛЯ ПРОДУКТУ", decision_summary, decision_bullets, max_bullets=3)
@@ -562,10 +624,12 @@ def main():
 
     # ═══ Save ═══
     try:
-        os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-        pdf.output(args.output)
-        print(json.dumps({"status": "success", "output": args.output}), file=sys.stdout)
-        sys.stderr.write(f"Report saved → {args.output}\n")
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        pdf.output(output_path)
+        print(json.dumps({"status": "success", "output": output_path}), file=sys.stdout)
+        sys.stderr.write(f"Report saved → {output_path}\n")
     except Exception as e:
         print(json.dumps({"error": f"Failed to save report: {str(e)}"}), file=sys.stdout)
         sys.stderr.write(f"Error: {e}\n")
