@@ -33,8 +33,8 @@ def main():
     parser.add_argument("--input", action="append", required=True, help="Path to JSON file(s) from fetch_pageviews.py. Can be specified multiple times.")
     parser.add_argument("--title", default="", help="Chart title (optional, leave empty for seamless report embedding)")
     parser.add_argument("--output", default="chart.png", help="Output PNG file path")
-    parser.add_argument("--width", type=float, default=9.2, help="Chart width in inches")
-    parser.add_argument("--height", type=float, default=3.0, help="Chart height in inches")
+    parser.add_argument("--width", type=float, default=10.5, help="Chart width in inches")
+    parser.add_argument("--height", type=float, default=5.2, help="Chart height in inches")
     parser.add_argument("--trend-line", action="store_true", help="Add subtle linear trend lines")
     
     args = parser.parse_args()
