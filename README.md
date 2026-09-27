@@ -29,22 +29,20 @@ Wikipedia — одне з найбільш об'єктивних відкрит�
 
 ```mermaid
 flowchart TD
-    User["Запит користувача (B2C Founder)"] --> Agent["AI-агент (наприклад, Claude Haiku 4.5)"]
+    User["Запит користувача: B2C Founder"] --> Agent["AI-агент: наприклад, Claude Haiku 4.5"]
     Agent -->|1. Пошук статей за темою| S1["scripts/resolve_articles.py"]
-    S1 -->|MediaWiki + Wikidata API| S1
-    S1 -->|JSON маппінг мов| Agent
+    S1 -->|MediaWiki та Wikidata API| Agent
 
     Agent -->|2. Завантаження time-series| S2["scripts/fetch_pageviews.py"]
-    S2 -->|Wikimedia Analytics API| S2
-    S2 -->|JSON з переглядами| Agent
+    S2 -->|Wikimedia Analytics API| Agent
 
     Agent -->|3. Математичний аналіз| S3["scripts/analyze_trends.py"]
     S3 -->|Тренд, R², YoY, аномалії, сезонність| Agent
 
     Agent -->|4. Візуалізація| S4["scripts/generate_chart.py"]
-    S4 -->|PNG графік з лініями тренду| Agent
+    S4 -->|PNG графік із лініями тренду| Agent
 
-    Agent -->|5. Підсумковий звіт (опціонально)| S5["scripts/generate_report.py"]
+    Agent -->|5. Підсумковий звіт: опціонально| S5["scripts/generate_report.py"]
     S5 -->|PDF A4 на 1 сторінку| Agent
 
     Agent --> Final["Фінальна структурована відповідь + Артефакти"]
