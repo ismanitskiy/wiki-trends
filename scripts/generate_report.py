@@ -131,9 +131,10 @@ def setup_font(pdf: FPDF) -> str:
 
 
 def fmt_n(n) -> str:
+    """Format number with non-breaking spaces between thousands (e.g. '3 176', '10 494')."""
     if n is None:
         return "—"
-    return f"{int(n):,}".replace(",", " ")
+    return f"{int(n):,}".replace(",", "\u00a0")
 
 
 def fmt_months(months: list[int]) -> str:
@@ -143,25 +144,37 @@ def fmt_months(months: list[int]) -> str:
 
 def smart_wrap_uk(text: str) -> str:
     """
-    1. Attach short Ukrainian prepositions and conjunctions to the following word
-       using non-breaking space (\\u00a0) to avoid trailing orphan words at line ends.
-    2. Insert soft hyphens (\\u00ad) into Ukrainian words (6+ chars) according to
-       official Ukrainian syllabic hyphenation rules (left=2, right=2).
+    Publishing-grade typography engine for Ukrainian text:
+    1. Replaces regular spaces in numbers with non-breaking spaces (\u00a0) so thousands never split.
+    2. Glues numbers to units/nouns (1\u00a0місяць, 24\u00a0місяці, 12.4x, 3.3x, 3\u00a0176/міс).
+    3. Glues 1-2 char prepositions/conjunctions to the following word.
+    4. Glues statistical notations (Z = 3.17, R² = 0.18).
+    5. Applies soft hyphens only to very long words (>= 9 chars) with left=3, right=3
+       to prevent ugly hyphenation of short common words like 'місяць', 'частка', 'подій'.
     """
     if not text:
         return ""
     nbsp = "\u00a0"
-    # Single and 2-letter prepositions/conjunctions
+    # Ensure thousand-separator spaces are non-breaking
+    text = re.sub(r'(\d+)\s+(\d+)', r'\g<1>' + nbsp + r'\g<2>', text)
+    # Number + unit / noun (e.g. 1 місяць, 24 місяці, 12.4x, 3.3x)
+    text = re.sub(r'(\d+)\s+(місяц[іявь]|років|рок[уи]|перегляд[іів]*|тис|млн)', r'\g<1>' + nbsp + r'\g<2>', text, flags=re.IGNORECASE)
+    # Ensure multipliers like 12.4x have NO space inside
+    text = re.sub(r'(\d+(?:[.,]\d+)?)\s+([xх%])', r'\g<1>\g<2>', text)
+
+    # 1-2 letter prepositions and conjunctions
     preps = r'\b(в|у|і|й|та|на|за|до|по|з|із|зі|для|про|від|під|над|при|без|як|не|чи|що)\s+'
     text = re.sub(preps, r'\g<1>' + nbsp, text, flags=re.IGNORECASE)
-    # Join numbers with units / multiplier (e.g. 12.4x, 3.3x)
-    text = re.sub(r'(\d+)\s+([xх%])', r'\g<1>' + nbsp + r'\g<2>', text)
 
-    # Syllabic hyphenation with soft hyphens
+    # Statistical labels
+    text = text.replace('Z = ', f'Z{nbsp}={nbsp}')
+    text = text.replace('R² = ', f'R²{nbsp}={nbsp}')
+
+    # Hyphenation only for long words (>= 9 chars), keeping short words intact
     if _pyphen_uk:
         def _repl(match):
             w = match.group(0)
-            if len(w) >= 6:
+            if len(w) >= 9:
                 return _pyphen_uk.inserted(w, SOFT_HYPHEN)
             return w
         pattern = r'[а-яА-Яa-zA-ZєіїґЄІЇҐ\']+'
@@ -280,7 +293,7 @@ def build_decision_from_data(datasets: list, comparison: dict) -> tuple[str, lis
     if peaks:
         bullets.append((
             "Сезонне вікно запуску",
-            smart_wrap_uk(f"Пік попиту в {seas_proj} припадає на: {fmt_months(peaks)}. Запуск промокампаній рекомендовано за 1 місяць до підйому.")
+            smart_wrap_uk(f"Сезонний пік ({fmt_months(peaks)}): старт промокампаній рекомендовано за 1 місяць до підйому.")
         ))
     else:
         bullets.append((
@@ -307,7 +320,7 @@ def build_signals_from_data(datasets: list) -> list[tuple[str, str]]:
             ratio = views / max(avg, 1)
             signals.append((
                 f"Сплеск {ts} (Z = {z:.2f})",
-                smart_wrap_uk(f"{proj}: {fmt_n(views)} переглядів (у {ratio:.1f}x вище норми {fmt_n(int(avg))}/міс).")
+                smart_wrap_uk(f"{proj}: {fmt_n(views)} переглядів (у {ratio:.1f}x вище середнього рівня {fmt_n(int(avg))}/міс).")
             ))
 
         # Seasonality peaks & troughs
@@ -317,12 +330,12 @@ def build_signals_from_data(datasets: list) -> list[tuple[str, str]]:
         if peaks:
             signals.append((
                 f"Сезонні піки ({proj})",
-                smart_wrap_uk(f"Підйом інтересу спостерігається у місяцях: {fmt_months(peaks)}.")
+                smart_wrap_uk(f"Найвищий органічний попит: {fmt_months(peaks)}.")
             ))
         if troughs:
             signals.append((
                 f"Сезонний спад ({proj})",
-                smart_wrap_uk(f"Мінімальна активність спостерігається у місяцях: {fmt_months(troughs)}.")
+                smart_wrap_uk(f"Період найнижчої активності: {fmt_months(troughs)}.")
             ))
 
         # YoY
@@ -338,23 +351,23 @@ def build_signals_from_data(datasets: list) -> list[tuple[str, str]]:
 
 
 def build_limitations_from_data(limitations: list) -> list[tuple[str, str]]:
-    """Build Column 3 (Limitations) with concise methodological explanations that fit within balanced margins."""
+    """Build Column 3 (Limitations) with balanced, 2-line methodological explanations."""
     items = [
         (
             "Інтерес ≠ прямий попит",
-            smart_wrap_uk("Перегляди відображають інформаційний інтерес, а не готовність купувати комерційні продукти.")
+            smart_wrap_uk("Перегляди сторінок свідчать про зацікавленість, а не готовність купувати комерційні продукти.")
         ),
         (
             "Медійні та новинні сплески",
-            smart_wrap_uk("Зовнішні інфоприводи чи суспільні події створюють тимчасовий неорганічний шум у динаміці.")
+            smart_wrap_uk("Зовнішні новини чи інфоприводи створюють тимчасовий неорганічний сплеск у попиті.")
         ),
         (
             "Волатильність локальних версій",
-            smart_wrap_uk("Розділи з меншою аудиторією мають вищу статистичну похибку та чутливість до поодиноких сплесків.")
+            smart_wrap_uk("Локальні версії мають меншу вибірку і вищу волатильність за глобальний розділ.")
         ),
         (
             "Фільтрація бот-трафіку (agent=user)",
-            smart_wrap_uk("Трафік ботів відфільтровано, проте невелика частка автоматизованих запитів може залишатися у вибірці.")
+            smart_wrap_uk("Фільтр agent=user відсікає ботів, проте незначна частка автозапитів залишається у вибірці.")
         )
     ]
     return items

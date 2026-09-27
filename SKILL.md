@@ -55,3 +55,13 @@ Run any script with `--help` to see all options.
 - **confidence "medium"** = trend exists but with variance — needs additional validation
 - **confidence "low"** = insufficient data or too much noise — not reliable alone
 - Always present limitations from the analysis output to the user
+
+### Section 7: Ukrainian Typography & PDF Report Standards
+When generating text or configuring report layouts, strictly follow Ukrainian publishing standards:
+- **No-break numbers (NBSP):** Thousand separators in figures (`3 176`, `10 494`) and number-unit pairs (`1 місяць`, `12.4x`, `(Z = 3.17)`) must use non-breaking spaces (`\u00a0`). Never allow digits or units to be torn across lines.
+- **Preposition binding:** Bind 1-2 letter prepositions (`у`, `в`, `і`, `та`, `на`, `за`, `до`) with `\u00a0` to avoid dangling words at line ends.
+- **Hyphenation discipline (§ 159):** Never hyphenate short words (< 8 letters such as `місяць`, `частка`, `подій`). Soft hyphens (`\u00ad`) are reserved only for long words (9+ letters) at valid syllable boundaries.
+- **Orphan avoidance:** Prevent single-word orphan lines at the end of paragraphs. Calibrate sentences to fill 2 balanced lines (~75–85 chars).
+- **English file naming:** Name output PDFs descriptively: `wikipedia_trends_{topic}_{langs}_period_{start}_to_{end}_date_{date}.pdf`.
+- For full details, see `references/ANALYSIS_GUIDE.md` Section 6.
+
