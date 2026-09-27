@@ -80,7 +80,7 @@ def main():
     # ── Typography & RC params ──
     plt.rcParams.update({
         'font.family': 'sans-serif',
-        'font.sans-serif': ['DejaVu Sans'],
+        'font.sans-serif': ['AppleGothic', 'Noto Sans CJK KR', 'Arial Unicode MS', 'DejaVu Sans', 'sans-serif'],
         'axes.edgecolor': '#D0D0D0',
         'axes.linewidth': 0.6,
         'xtick.color': '#6B7280',
@@ -197,8 +197,12 @@ def main():
     # ── Tick styling: no tick marks, just labels ──
     ax.tick_params(axis='both', which='both', length=0, labelsize=8.5, pad=6)
     
-    # ── Y-axis: thousands separator ──
-    ax.yaxis.set_major_formatter(ticker.StrMethodFormatter('{x:,.0f}'))
+    # ── Y-axis: smart formatter (thousands with commas, millions as M) ──
+    def format_y_axis(val, _):
+        if val >= 1_000_000:
+            return f"{val*1e-6:.1f}M".replace(".0M", "M")
+        return f"{val:,.0f}"
+    ax.yaxis.set_major_formatter(ticker.FuncFormatter(format_y_axis))
     
     # Y-axis label omitted here; unit is displayed in card title for maximal width
     # ax.set_ylabel("Перегляди / місяць", fontsize=9, labelpad=10)

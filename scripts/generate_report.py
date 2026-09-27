@@ -563,6 +563,10 @@ def main():
         pdf.set_xy(ML + 6.0, cy + 9.0)
         pdf.set_font(ff, "B", 10.2)
         pdf.set_text_color(*TEXT_900)
+        # If article contains CJK/Hangul glyphs that DejaVu lacks, provide clean Latin fallback
+        if any(0x2E80 <= ord(c) <= 0xD7AF for c in article):
+            article = "Stock market" if "주식" in article else ds.get("article", "Topic").replace("_", " ")
+
         avail_art_w = COL_W - 12.0  # 76.0 mm available!
         art_wrapped = smart_wrap_uk(article)
         if pdf.get_string_width(article) <= avail_art_w:

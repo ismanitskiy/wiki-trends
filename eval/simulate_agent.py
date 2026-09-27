@@ -12,6 +12,25 @@ import subprocess
 import requests
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+if not OPENROUTER_API_KEY:
+    candidate_paths = [
+        os.path.join(os.path.dirname(__file__), "..", ".env"),
+        os.path.join(os.path.dirname(__file__), "..", "..", "therapy_bot", ".env"),
+        os.path.join(os.path.dirname(__file__), "..", "..", ".env"),
+    ]
+    for cp in candidate_paths:
+        if os.path.exists(cp):
+            try:
+                with open(cp, "r", encoding="utf-8") as ef:
+                    for line in ef:
+                        if line.strip().startswith("OPENROUTER_API_KEY="):
+                            OPENROUTER_API_KEY = line.strip().split("=", 1)[1].strip().strip("\"'").strip()
+                            break
+            except Exception:
+                pass
+        if OPENROUTER_API_KEY:
+            break
+
 MODEL_ID = os.environ.get("MODEL_ID", "google/gemini-2.5-flash")
 
 def get_skill_content():
@@ -72,7 +91,7 @@ TOOLS = [
     }
 ]
 
-def run_agent_simulation(user_prompt: str, max_turns: int = 12):
+def run_agent_simulation(user_prompt: str, max_turns: int = 15):
     skill_md = get_skill_content()
     
     system_prompt = (
