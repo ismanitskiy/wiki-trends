@@ -20,11 +20,11 @@ Features:
 """
 import argparse
 import json
-import math
 import os
 import re
 import sys
 from datetime import datetime
+
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
@@ -238,11 +238,11 @@ def build_decision_from_data(datasets: list, comparison: dict) -> tuple[str, lis
 
     if avg1 > avg0:
         larger, smaller = ds1, ds0
-        l_proj, s_proj = proj1, proj0
+        l_proj = proj1
         ratio = avg1 / max(avg0, 1)
     else:
         larger, smaller = ds0, ds1
-        l_proj, s_proj = proj0, proj1
+        l_proj = proj0
         ratio = avg0 / max(avg1, 1)
 
     l_avg = int(larger.get("avg_views", 0))
@@ -288,7 +288,6 @@ def build_decision_from_data(datasets: list, comparison: dict) -> tuple[str, lis
 
     # 3. Launch window / Seasonality
     seas_ds = ds0 if ds0.get("seasonality", {}).get("peak_months") else ds1
-    seas_proj = seas_ds.get("project", "").split(".")[0].upper()
     peaks = seas_ds.get("seasonality", {}).get("peak_months", [])
     if peaks:
         bullets.append((
@@ -455,7 +454,7 @@ def main():
         with open(args.analysis, 'r', encoding='utf-8') as f:
             data = json.load(f)
     except Exception as e:
-        print(json.dumps({"error": f"Failed to read {args.analysis}: {str(e)}"}), file=sys.stdout)
+        print(json.dumps({"error": f"Failed to read {args.analysis}: {e!s}"}), file=sys.stdout)
         sys.exit(1)
 
     datasets = data.get("datasets", [])
@@ -552,7 +551,7 @@ def main():
 
         # ── Card Top Header Row (cy + 3.8) ──
         badge_bg = (238, 242, 255) if i == 0 else (255, 241, 242) if i == 1 else (240, 253, 250)
-        lpw = pdf.draw_pill(ML + 6.0, cy + 3.6, text=lang, bg=badge_bg, tc=accent_c, font_size=6.8, bold=True, h=4.4)
+        pdf.draw_pill(ML + 6.0, cy + 3.6, text=lang, bg=badge_bg, tc=accent_c, font_size=6.8, bold=True, h=4.4)
 
         # Domain Badge (Right-aligned)
         pdf.set_xy(ML + COL_W - 35.0, cy + 3.6)
@@ -631,14 +630,15 @@ def main():
 
     # ── Chart Card (RIGHT 2/3) ──
     pdf.draw_card(CHART_X, hero_y, CHART_W, hero_h, r=3.5)
-    pdf.set_xy(CHART_X + 6.0, hero_y + 3.8)
+    # Title aligned precisely with the vertical Y-axis spine (16.0 mm from left card border)
+    pdf.set_xy(CHART_X + 16.0, hero_y + 4.0)
     pdf.set_font(ff, "B", 7.8)
     pdf.set_text_color(*TEXT_500)
-    pdf.cell(CHART_W - 12, 4.0, "ДИНАМІКА ПОПИТУ ТА ДОВГОСТРОКОВИЙ ТРЕНД (ПЕРЕГЛЯДИ / МІСЯЦЬ)")
+    pdf.cell(CHART_W - 32.0, 4.0, "ДИНАМІКА ПОПИТУ ТА ДОВГОСТРОКОВИЙ ТРЕНД (ПЕРЕГЛЯДИ / МІСЯЦЬ)")
 
     if os.path.exists(args.chart):
         try:
-            pdf.image(args.chart, x=CHART_X + 2.0, y=hero_y + 8.5, w=CHART_W - 4.0, h=hero_h - 10.5)
+            pdf.image(args.chart, x=CHART_X, y=hero_y + 8.5, w=CHART_W, h=hero_h - 11.0)
         except Exception as e:
             sys.stderr.write(f"Chart render warning: {e}\n")
 
@@ -717,7 +717,7 @@ def main():
         print(json.dumps({"status": "success", "output": output_path}), file=sys.stdout)
         sys.stderr.write(f"Report saved → {output_path}\n")
     except Exception as e:
-        print(json.dumps({"error": f"Failed to save report: {str(e)}"}), file=sys.stdout)
+        print(json.dumps({"error": f"Failed to save report: {e!s}"}), file=sys.stdout)
         sys.stderr.write(f"Error: {e}\n")
         sys.exit(1)
 

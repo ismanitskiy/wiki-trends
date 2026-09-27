@@ -8,8 +8,8 @@
 import argparse
 import json
 import sys
+
 import requests
-import urllib.parse
 
 HEADERS = {
     "User-Agent": "WikiTrendsSkill/1.0 (wiki-trends-skill@example.com)"
@@ -50,7 +50,7 @@ def get_wikidata_sitelinks(lang, title):
         res.raise_for_status()
         pages = res.json().get("query", {}).get("pages", {})
         wikibase_item = None
-        for pid, pdata in pages.items():
+        for pdata in pages.values():
             wikibase_item = pdata.get("pageprops", {}).get("wikibase_item")
             if wikibase_item:
                 break
@@ -97,7 +97,7 @@ def get_langlinks(lang, title):
         data = response.json()
         pages = data.get("query", {}).get("pages", {})
         links = {}
-        for page_id, page_info in pages.items():
+        for page_info in pages.values():
             for ll in page_info.get("langlinks", []):
                 links[ll["lang"]] = ll["*"]
         return links
@@ -184,7 +184,7 @@ def main():
             with open(args.output, "w", encoding="utf-8") as f:
                 f.write(output_json + "\n")
             sys.stderr.write(f"Data saved to {args.output}\n")
-        except IOError as e:
+        except OSError as e:
             sys.stderr.write(f"Error writing to file: {e}\n")
             sys.exit(1)
     else:

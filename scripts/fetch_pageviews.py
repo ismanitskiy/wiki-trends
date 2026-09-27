@@ -8,8 +8,10 @@
 import argparse
 import json
 import sys
-import requests
 from urllib.parse import unquote
+
+import requests
+
 
 def fetch_pageviews(project, article, start, end, granularity):
     headers = {
@@ -18,6 +20,7 @@ def fetch_pageviews(project, article, start, end, granularity):
     url = f"https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/{project}/all-access/user/{article}/{granularity}/{start}00/{end}00"
     
     sys.stderr.write(f"Fetching data from: {url}\n")
+    response = None
     try:
         response = requests.get(url, headers=headers)
         response.raise_for_status()
@@ -79,7 +82,7 @@ def main():
             with open(args.output, "w", encoding="utf-8") as f:
                 f.write(output_json + "\n")
             sys.stderr.write(f"Data saved to {args.output}\n")
-        except IOError as e:
+        except OSError as e:
             sys.stderr.write(f"Error writing to file: {e}\n")
             sys.exit(1)
     else:

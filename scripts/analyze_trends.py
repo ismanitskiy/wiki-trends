@@ -7,10 +7,11 @@
 
 import argparse
 import json
-import sys
 import os
+import sys
+
 import numpy as np
-from datetime import datetime
+
 
 def load_data(filepath):
     try:
@@ -128,7 +129,7 @@ def detect_seasonality(data_list):
     detected = len(peaks) > 0 or len(troughs) > 0
     
     if detected:
-        expl = f"Виявлено суттєві сезонні коливання інтересу між місяцями."
+        expl = "Виявлено суттєві сезонні коливання інтересу між місяцями."
     else:
         expl = "Вираженої сезонності не виявлено."
         

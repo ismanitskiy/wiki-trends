@@ -9,12 +9,14 @@ import argparse
 import json
 import sys
 from datetime import datetime
+
 import matplotlib
+
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import matplotlib.ticker as ticker
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import ticker
 
 # SaaS Dashboard Palette: Royal Blue, Rose/Coral, Emerald/Teal, Amber
 PALETTE = [
@@ -46,7 +48,7 @@ def main():
             with open(input_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         except Exception as e:
-            print(json.dumps({"error": f"Failed to read {input_file}: {str(e)}"}), file=sys.stdout)
+            print(json.dumps({"error": f"Failed to read {input_file}: {e!s}"}), file=sys.stdout)
             print(f"Error reading {input_file}: {e}", file=sys.stderr)
             sys.exit(1)
             
@@ -89,7 +91,19 @@ def main():
         'axes.labelcolor': '#6B7280',
     })
     
-    fig, ax = plt.subplots(figsize=(args.width, args.height), dpi=200)
+    # ── Symmetrical Layout Matched to Card (181.5 x 85.0 mm) ──
+    fig_w_in = args.width if args.width != 10.5 else (181.5 / 25.4)
+    fig_h_in = args.height if args.height != 5.2 else (85.0 / 25.4)
+    fig = plt.figure(figsize=(fig_w_in, fig_h_in), dpi=200, facecolor=BG_COLOR)
+    
+    card_w_mm = fig_w_in * 25.4
+    left_ratio = 16.0 / card_w_mm
+    right_ratio = 1.0 - (6.5 / card_w_mm)
+    bottom_ratio = 0.17
+    top_ratio = 0.96
+    
+    ax = fig.add_axes([left_ratio, bottom_ratio, right_ratio - left_ratio, top_ratio - bottom_ratio])
+    ax.set_facecolor(BG_COLOR)
     
     # ── Minimal spines: only bottom + left, very thin ──
     ax.spines['top'].set_visible(False)
@@ -104,6 +118,8 @@ def main():
     ax.xaxis.grid(False)
     ax.set_axisbelow(True)
     
+    all_dates = []
+
     for ds in datasets:
         parsed_dates = []
         for ts in ds["timestamps"]:
@@ -122,6 +138,7 @@ def main():
         color = ds["color"]
         
         if len(parsed_dates) == len(ds["views"]) and parsed_dates:
+            all_dates.extend(parsed_dates)
             # Semi-transparent area fill (Tableau-style subtle shading)
             ax.fill_between(parsed_dates, ds["views"], color=color, alpha=0.07)
             
@@ -171,8 +188,9 @@ def main():
             ax.set_xticks(x_seq)
             ax.set_xticklabels(ds["timestamps"])
 
-    # ── X-axis formatting ──
-    if datasets and parsed_dates:
+    # ── X-axis formatting (edge-to-edge: eliminates blank margins on left and right) ──
+    if all_dates:
+        ax.set_xlim(min(all_dates), max(all_dates))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=5, maxticks=10))
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
 
@@ -190,12 +208,12 @@ def main():
         ax.set_title(args.title, fontsize=12, weight='bold', color='#1F2937', pad=16, loc='left')
         
     # ── Legend: clean, horizontal, bottom-anchored, frameless ──
-    legend = ax.legend(
+    ax.legend(
         loc='upper center',
-        bbox_to_anchor=(0.5, -0.12),
+        bbox_to_anchor=(0.5, -0.13),
         ncol=len(datasets),
         frameon=False,
-        fontsize=9,
+        fontsize=8.5,
         labelcolor='#4B5563',
         handlelength=2.0,
         handletextpad=0.6,
@@ -205,19 +223,15 @@ def main():
     # ── Add min Y padding ──
     y_min, y_max = ax.get_ylim()
     ax.set_ylim(bottom=max(0, y_min - (y_max - y_min) * 0.05))
-            
-    plt.tight_layout()
-    
     try:
         plt.savefig(
             args.output, dpi=200,
-            facecolor=BG_COLOR, edgecolor='none',
-            bbox_inches='tight', pad_inches=0.04
+            facecolor=BG_COLOR, edgecolor='none'
         )
         print(json.dumps({"status": "success", "output": args.output}), file=sys.stdout)
         sys.stderr.write(f"Chart successfully saved to {args.output}\n")
     except Exception as e:
-        print(json.dumps({"error": f"Failed to save chart: {str(e)}"}), file=sys.stdout)
+        print(json.dumps({"error": f"Failed to save chart: {e!s}"}), file=sys.stdout)
         sys.stderr.write(f"Error saving chart: {e}\n")
         sys.exit(1)
 

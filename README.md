@@ -82,8 +82,8 @@ wiki-trends/
 | `resolve_articles.py` | Знаходить точні назви статей цільовими мовами через MediaWiki `langlinks` та Wikidata `sitelinks`. | `--query`, `--source-lang`, `--target-langs` | JSON з мапінгом `{lang: {title, project}}` та списком `not_found` |
 | `fetch_pageviews.py` | Завантажує помісячну або щоденну статистику переглядів з фільтрацією ботів (`agent=user`). | `--project`, `--article`, `--start`, `--end`, `--granularity` | JSON з масивом часового ряду та сумарними переглядами |
 | `analyze_trends.py` | Рахує лінійну регресію, зміну у %, YoY, Z-score аномалії, сезонність і рівень довіри (`confidence`). | `--input` (один або кілька JSON), `--output` | JSON з метриками, порівняльним аналізом та обмеженнями |
-| `generate_chart.py` | Створює чистий графік у PNG (150 DPI) із лініями тренду та форматуванням чисел. | `--input`, `--title`, `--output`, `--trend-line` | PNG файл |
-| `generate_report.py` | Формує стислий односторінковий PDF з графіком, таблицею метрик, висновками та обмеженнями. | `--analysis`, `--chart`, `--title`, `--output` | PDF файл на 1 сторінку |
+| `generate_chart.py` | Створює графік у стилі Tableau BI (PNG, 200 DPI) із лініями тренду, симетрією відступів та вирівнюванням по сітці звіту. | `--input`, `--title`, `--output`, `--trend-line` | PNG файл |
+| `generate_report.py` | Формує стислий односторінковий альбомний PDF (A4 Landscape) за швейцарською сіткою верстки з графіком, KPI-картками, продуктовими рішеннями та суворою типографікою (§ 159). | `--analysis`, `--chart`, `--title`, `--output` | PDF файл на 1 сторінку |
 
 ---
 

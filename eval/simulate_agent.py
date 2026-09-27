@@ -12,7 +12,7 @@ import subprocess
 import requests
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
-MODEL_ID = os.environ.get("MODEL_ID", "anthropic/claude-haiku-4.5")
+MODEL_ID = os.environ.get("MODEL_ID", "google/gemini-2.5-flash")
 
 def get_skill_content():
     skill_path = os.path.join(os.path.dirname(__file__), "..", "SKILL.md")
